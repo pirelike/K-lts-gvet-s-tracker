@@ -1,6 +1,6 @@
 {
 	"name": "koltsegvetes-tracker",
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"private": true,
 	"description": "Személyes költségvetés-követő: offline, szerver nélküli PWA (SvelteKit + IndexedDB)",
 	"type": "module",
@@ -15,7 +15,8 @@
 		"test": "vitest run",
 		"test:watch": "vitest",
 		"icons": "node scripts/make-icons.mjs",
-		"e2e": "node e2e/smoke.mjs"
+		"e2e": "node e2e/smoke.mjs",
+		"e2e:features": "node e2e/features.mjs"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-static": "^3.0.10",

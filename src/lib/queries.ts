@@ -4,7 +4,7 @@
  */
 import { fold } from './text';
 import { monthRange } from './dates';
-import type { Account, Category, Transaction, TxType } from './types';
+import { balanceSign, txParts, type Account, type Category, type Recurring, type Transaction, type TxType } from './types';
 
 export interface TxFilters {
 	q?: string;
@@ -38,7 +38,7 @@ export function filterTransactions(txs: readonly Transaction[], f: TxFilters): T
 	const terms = f.q ? fold(f.q).split(' ').filter(Boolean) : [];
 	const out = txs.filter((t) => {
 		if (f.type && t.type !== f.type) return false;
-		if (f.categoryId != null && t.categoryId !== f.categoryId) return false;
+		if (f.categoryId != null && !txParts(t).some((p) => p.categoryId === f.categoryId)) return false;
 		if (f.accountId != null && t.accountId !== f.accountId && t.toAccountId !== f.accountId) {
 			return false;
 		}
@@ -59,22 +59,30 @@ export function filterTransactions(txs: readonly Transaction[], f: TxFilters): T
 export interface Totals {
 	count: number;
 	income: number;
+	/** Nettó kiadás: a kiadások mínusz a jóváírások (visszatérítések). */
 	expense: number;
+	/** A jóváírások összege (ezzel csökkent a kiadás). */
+	refund: number;
+	/** A jóváírás nélküli kiadások összege. */
+	grossExpense: number;
 	transferCount: number;
-	/** bevétel − kiadás (az átvezetés nem számít bele) */
+	/** bevétel − nettó kiadás (az átvezetés nem számít bele) */
 	net: number;
 }
 
 export function summarize(txs: readonly Transaction[]): Totals {
 	let income = 0;
-	let expense = 0;
+	let gross = 0;
+	let refund = 0;
 	let transferCount = 0;
 	for (const t of txs) {
 		if (t.type === 'income') income += t.amount;
-		else if (t.type === 'expense') expense += t.amount;
+		else if (t.type === 'expense') gross += t.amount;
+		else if (t.type === 'refund') refund += t.amount;
 		else transferCount++;
 	}
-	return { count: txs.length, income, expense, transferCount, net: income - expense };
+	const expense = gross - refund;
+	return { count: txs.length, income, expense, refund, grossExpense: gross, transferCount, net: income - expense };
 }
 
 export interface DayGroup {
@@ -94,11 +102,9 @@ export function groupByDay(sorted: readonly Transaction[]): DayGroup[] {
 			groups.push(g);
 		}
 		g.items.push(t);
-		if (t.type === 'income') {
-			g.net += t.amount;
-			g.hasIncomeOrExpense = true;
-		} else if (t.type === 'expense') {
-			g.net -= t.amount;
+		const sign = balanceSign(t.type);
+		if (sign !== 0) {
+			g.net += sign * t.amount;
 			g.hasIncomeOrExpense = true;
 		}
 	}
@@ -119,28 +125,41 @@ export interface CategoryShare {
 export interface MonthSummary {
 	month: string;
 	income: number;
+	/** Nettó kiadás (a jóváírásokkal csökkentve). */
 	expense: number;
+	refund: number;
 	balance: number;
 	expenseByCategory: CategoryShare[];
 	incomeByCategory: CategoryShare[];
 	count: number;
 }
 
+/**
+ * Kategóriánkénti bontás. Kiadásnál a jóváírások (visszatérítések) levonódnak a kategória költéséből,
+ * a felosztott tételek a részeik kategóriájába számítanak. A nulla vagy negatív nettó összegű
+ * kategóriák (pl. csak visszatérítés volt) kimaradnak.
+ */
 function breakdown(
 	txs: readonly Transaction[],
-	type: 'income' | 'expense',
+	kind: 'income' | 'expense',
 	cats: Map<number, Category>,
 	total: number
 ): CategoryShare[] {
 	const sums = new Map<number, { amount: number; count: number }>();
 	for (const t of txs) {
-		if (t.type !== type || t.categoryId == null) continue;
-		const s = sums.get(t.categoryId) ?? { amount: 0, count: 0 };
-		s.amount += t.amount;
-		s.count++;
-		sums.set(t.categoryId, s);
+		let sign = 0;
+		if (kind === 'income') sign = t.type === 'income' ? 1 : 0;
+		else sign = t.type === 'expense' ? 1 : t.type === 'refund' ? -1 : 0;
+		if (sign === 0) continue;
+		for (const part of txParts(t)) {
+			const s = sums.get(part.categoryId) ?? { amount: 0, count: 0 };
+			s.amount += sign * part.amount;
+			s.count++;
+			sums.set(part.categoryId, s);
+		}
 	}
 	return [...sums.entries()]
+		.filter(([, s]) => s.amount > 0)
 		.map(([categoryId, s]) => {
 			const c = cats.get(categoryId);
 			return {
@@ -170,6 +189,7 @@ export function monthSummary(
 		month,
 		income: totals.income,
 		expense: totals.expense,
+		refund: totals.refund,
 		balance: totals.net,
 		expenseByCategory: breakdown(inMonth, 'expense', cats, totals.expense),
 		incomeByCategory: breakdown(inMonth, 'income', cats, totals.income),
@@ -187,27 +207,46 @@ export function accountBalances(
 		if (id != null && bal.has(id)) bal.set(id, bal.get(id)! + delta);
 	};
 	for (const t of txs) {
-		if (t.type === 'income') add(t.accountId, t.amount);
-		else if (t.type === 'expense') add(t.accountId, -t.amount);
-		else {
+		if (t.type === 'transfer') {
 			add(t.accountId, -t.amount);
 			add(t.toAccountId, t.amount);
+		} else {
+			add(t.accountId, balanceSign(t.type) * t.amount);
 		}
 	}
 	return bal;
 }
 
-export function categoryUsage(txs: readonly Transaction[]): Map<number, number> {
+/** Hányszor használják a kategóriát (a felosztott tételek részei és az ismétlődő szabályok is számítanak). */
+export function categoryUsage(
+	txs: readonly Transaction[],
+	recurring: readonly Recurring[] = []
+): Map<number, number> {
 	const m = new Map<number, number>();
-	for (const t of txs) if (t.categoryId != null) m.set(t.categoryId, (m.get(t.categoryId) ?? 0) + 1);
+	const bump = (id: number) => m.set(id, (m.get(id) ?? 0) + 1);
+	for (const t of txs) {
+		if (t.splits && t.splits.length > 0) for (const p of t.splits) bump(p.categoryId);
+		else if (t.categoryId != null) bump(t.categoryId);
+	}
+	for (const r of recurring) if (r.categoryId != null) bump(r.categoryId);
 	return m;
 }
 
-export function accountUsage(txs: readonly Transaction[]): Map<number, number> {
+export function accountUsage(
+	txs: readonly Transaction[],
+	recurring: readonly Recurring[] = []
+): Map<number, number> {
 	const m = new Map<number, number>();
+	const bump = (id: number | null) => {
+		if (id != null) m.set(id, (m.get(id) ?? 0) + 1);
+	};
 	for (const t of txs) {
-		m.set(t.accountId, (m.get(t.accountId) ?? 0) + 1);
-		if (t.toAccountId != null) m.set(t.toAccountId, (m.get(t.toAccountId) ?? 0) + 1);
+		bump(t.accountId);
+		bump(t.toAccountId);
+	}
+	for (const r of recurring) {
+		bump(r.accountId);
+		bump(r.toAccountId);
 	}
 	return m;
 }
@@ -229,7 +268,7 @@ export interface KnownDescription {
 export function knownDescriptions(txs: readonly Transaction[]): KnownDescription[] {
 	const map = new Map<string, KnownDescription & { lastDate: string; lastId: number }>();
 	for (const t of txs) {
-		if (t.type === 'transfer' || t.categoryId == null || !t.description) continue;
+		if ((t.type !== 'income' && t.type !== 'expense') || t.categoryId == null || !t.description) continue;
 		const folded = fold(t.description);
 		const key = `${t.type}|${folded}`;
 		const cur = map.get(key);
@@ -282,6 +321,7 @@ export function suggestDescriptions(
 export interface LastUsed {
 	expense: { categoryId: number | null; accountId: number | null };
 	income: { categoryId: number | null; accountId: number | null };
+	refund: { categoryId: number | null; accountId: number | null };
 	transfer: { accountId: number | null; toAccountId: number | null };
 }
 
@@ -290,6 +330,7 @@ export function lastUsed(txs: readonly Transaction[]): LastUsed {
 	const res: LastUsed = {
 		expense: { categoryId: null, accountId: null },
 		income: { categoryId: null, accountId: null },
+		refund: { categoryId: null, accountId: null },
 		transfer: { accountId: null, toAccountId: null }
 	};
 	const latest: Partial<Record<TxType, Transaction>> = {};
@@ -304,6 +345,9 @@ export function lastUsed(txs: readonly Transaction[]): LastUsed {
 	}
 	if (latest.income) {
 		res.income = { categoryId: latest.income.categoryId, accountId: latest.income.accountId };
+	}
+	if (latest.refund) {
+		res.refund = { categoryId: latest.refund.categoryId, accountId: latest.refund.accountId };
 	}
 	if (latest.transfer) {
 		res.transfer = { accountId: latest.transfer.accountId, toAccountId: latest.transfer.toAccountId };

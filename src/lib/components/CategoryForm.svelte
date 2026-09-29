@@ -1,14 +1,9 @@
-<script module lang="ts">
-	export const PALETTE = [
-		'#f97316', '#ef4444', '#ec4899', '#a855f7', '#8b5cf6', '#3b82f6',
-		'#06b6d4', '#14b8a6', '#16a34a', '#65a30d', '#eab308', '#64748b'
-	];
-</script>
-
 <script lang="ts">
+	import { PALETTE } from '$lib/palette';
 	import type { CategoryType } from '$lib/types';
-	import { validateCategory, type CategoryField, type CategoryFormValues } from '$lib/validation';
+	import { validateCategory, type CategoryField, type CategoryValues } from '$lib/validation';
 	import { ledger } from '$lib/ledger.svelte';
+	import { toInputAmount } from '$lib/money';
 	import { untrack } from 'svelte';
 
 	let {
@@ -20,10 +15,10 @@
 		oncancel
 	}: {
 		type: CategoryType;
-		initial?: { name: string; icon: string; color: string };
+		initial?: { name: string; icon: string; color: string; monthlyBudget?: number | null };
 		editingId?: number;
 		submitLabel: string;
-		onsave: (v: CategoryFormValues) => Promise<void> | void;
+		onsave: (v: CategoryValues) => Promise<void> | void;
 		oncancel?: () => void;
 	} = $props();
 
@@ -31,12 +26,13 @@
 	let name = $state(init?.name ?? '');
 	let icon = $state(init?.icon ?? '');
 	let color = $state(init?.color ?? PALETTE[0]);
+	let budget = $state(init?.monthlyBudget ? toInputAmount(init.monthlyBudget) : '');
 	let errors = $state<Partial<Record<CategoryField, string>>>({});
 	const uid = $props.id();
 
 	async function submit(e: SubmitEvent) {
 		e.preventDefault();
-		const res = validateCategory({ name, type, color, icon }, ledger.categories, editingId);
+		const res = validateCategory({ name, type, color, icon, monthlyBudget: budget }, ledger.categories, editingId);
 		if (!res.ok) {
 			errors = res.errors;
 			return;
@@ -46,6 +42,7 @@
 		if (!editingId) {
 			name = '';
 			icon = '';
+			budget = '';
 		}
 	}
 </script>
@@ -63,6 +60,14 @@
 	</div>
 	{#if errors.name}<p class="error" role="alert">{errors.name}</p>{/if}
 	{#if errors.icon}<p class="error" role="alert">{errors.icon}</p>{/if}
+	{#if type === 'expense'}
+		<div class="field">
+			<label for={`${uid}-budget`}>Havi keret (nem kötelező)</label>
+			<input id={`${uid}-budget`} type="text" inputmode="decimal" autocomplete="off" bind:value={budget} placeholder="pl. 40 000" aria-invalid={errors.monthlyBudget ? 'true' : undefined} />
+			{#if errors.monthlyBudget}<p class="error" role="alert">{errors.monthlyBudget}</p>{/if}
+			<p class="hint">A főoldalon sáv mutatja a kihasználtságát; 80% és 100% felett figyelmeztet.</p>
+		</div>
+	{/if}
 	<fieldset class="field">
 		<legend class="label">Szín</legend>
 		<div class="swatches" role="radiogroup">

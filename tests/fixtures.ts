@@ -1,9 +1,9 @@
 import type { Account, Category, Transaction } from '../src/lib/types';
 
 export const accounts: Account[] = [
-	{ id: 1, name: 'Készpénz', initialBalance: 10000, archived: false, sortOrder: 1, createdAt: 1 },
-	{ id: 2, name: 'Bankkártya', initialBalance: 50000, archived: false, sortOrder: 2, createdAt: 2 },
-	{ id: 3, name: 'Régi számla', initialBalance: 0, archived: true, sortOrder: 3, createdAt: 3 }
+	{ id: 1, name: 'Készpénz', type: 'cash', initialBalance: 10000, archived: false, sortOrder: 1, createdAt: 1 },
+	{ id: 2, name: 'Bankkártya', type: 'checking', initialBalance: 50000, archived: false, sortOrder: 2, createdAt: 2 },
+	{ id: 3, name: 'Régi számla', type: 'checking', initialBalance: 0, archived: true, sortOrder: 3, createdAt: 3 }
 ];
 
 export const categories: Category[] = [

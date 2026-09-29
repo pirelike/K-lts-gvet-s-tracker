@@ -397,6 +397,18 @@ select[aria-invalid='true'] {
 	outline: 3px solid var(--focus);
 }
 
+/* Négy elemes választó (Kiadás / Bevétel / Jóváírás / Átvezetés): szűkebb belső tér, hogy telefonon is elférjen. */
+.seg.four > label,
+.seg.four > a,
+.seg.four > button {
+	padding: 0 4px;
+	font-size: 0.86rem;
+}
+.seg > label:has(input:checked).t-refund,
+.seg > a.active.t-refund {
+	color: var(--income);
+}
+
 /* Kiemelt változat (pl. gyors dátumgombok): a kijelölés az app színével, jól látszik sötét módban is. */
 .seg.accent {
 	background: var(--surface);
@@ -611,6 +623,21 @@ hr {
 	display: grid;
 	grid-template-columns: repeat(5, 1fr);
 }
+/* Telefonon csak öt elem van az alsó sávban; a „wide-only" elemek nagy kijelzőn az oldalsávban jelennek meg. */
+.nav a.wide-only {
+	display: none;
+}
+.nav-badge {
+	min-width: 20px;
+	padding: 0 6px;
+	border-radius: 999px;
+	background: var(--primary);
+	color: var(--primary-fg);
+	font-size: 0.72rem;
+	font-weight: 700;
+	line-height: 20px;
+	text-align: center;
+}
 .nav a {
 	display: flex;
 	flex-direction: column;
@@ -669,6 +696,12 @@ hr {
 		flex-direction: column;
 		align-items: stretch;
 		gap: 4px;
+	}
+	.nav a.wide-only {
+		display: flex;
+	}
+	.nav a.narrow-only {
+		display: none;
 	}
 	.nav a {
 		flex-direction: row;
@@ -1077,4 +1110,211 @@ details.more > summary::-webkit-details-marker {
 		opacity: 0;
 		transform: translateX(-32px);
 	}
+}
+
+/* felosztott tétel sorai */
+.split-row select {
+	flex: 1;
+	min-width: 0;
+}
+.split-row input {
+	width: 8.5em;
+	flex: none;
+}
+
+/* csoportos műveletek sávja a tétellista alján */
+.bulkbar {
+	position: fixed;
+	z-index: 25;
+	left: 8px;
+	right: 8px;
+	bottom: calc(var(--nav-h) + env(safe-area-inset-bottom) + 8px);
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 10px 12px;
+	background: var(--surface);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	box-shadow: var(--shadow);
+}
+.bulkbar select {
+	width: auto;
+	min-height: 36px;
+	padding: 4px 8px;
+	max-width: 46%;
+}
+@media (min-width: 900px) {
+	.bulkbar {
+		left: 240px;
+		right: 16px;
+		bottom: 16px;
+		max-width: 728px;
+	}
+}
+
+/* ---------- grafikonok (src/lib/components/charts) ---------- */
+
+:root {
+	/* Ellenőrzött (színtévesztés-biztos) két sorozatszín: kék és narancs. */
+	--viz-1: #2a78d6;
+	--viz-2: #eb6834;
+	--viz-muted: #8b91a0;
+	--viz-grid: var(--border);
+}
+@media (prefers-color-scheme: dark) {
+	:root {
+		--viz-1: #3987e5;
+		--viz-2: #d95926;
+		--viz-muted: #8a91a3;
+	}
+}
+.viz {
+	margin: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+.viz-legend {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px 16px;
+	font-size: 0.85rem;
+	color: var(--muted);
+}
+.viz-legend .swatch,
+.viz-tip .key {
+	display: inline-block;
+	width: 10px;
+	height: 10px;
+	border-radius: 2px;
+	margin-right: 6px;
+	vertical-align: baseline;
+}
+.viz-tip .key {
+	width: 12px;
+	height: 3px;
+	border-radius: 2px;
+	margin-right: 0;
+	align-self: center;
+}
+.viz-scroll {
+	overflow-x: auto;
+	overscroll-behavior-x: contain;
+}
+.viz-box {
+	position: relative;
+	min-width: 100%;
+}
+.viz svg {
+	display: block;
+	max-width: none;
+	touch-action: pan-x pan-y;
+}
+.viz .grid {
+	stroke: var(--viz-grid);
+	stroke-width: 1;
+}
+.viz .axis {
+	stroke: var(--muted);
+	stroke-opacity: 0.5;
+	stroke-width: 1;
+}
+.viz .tick {
+	fill: var(--muted);
+	font-size: 11px;
+	font-variant-numeric: tabular-nums;
+}
+.viz .hl {
+	fill: var(--primary-soft);
+}
+.viz .hit {
+	fill: transparent;
+	outline: none;
+}
+.viz .hit:focus-visible {
+	stroke: var(--focus);
+	stroke-width: 2;
+	rx: 6;
+}
+.viz-tip {
+	position: absolute;
+	top: 4px;
+	transform: translateX(-50%);
+	pointer-events: none;
+	z-index: 2;
+	min-width: 120px;
+	padding: 8px 10px;
+	border-radius: 10px;
+	background: var(--surface);
+	border: 1px solid var(--border);
+	box-shadow: var(--shadow);
+	font-size: 0.85rem;
+}
+.viz-tip-title {
+	color: var(--muted);
+	margin-bottom: 4px;
+}
+.viz-tip-row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+.viz-tip-row strong {
+	color: var(--text);
+}
+.viz-tip-row span {
+	color: var(--muted);
+}
+.viz-table > summary {
+	cursor: pointer;
+	font-size: 0.85rem;
+	color: var(--primary);
+	font-weight: 600;
+}
+.viz-table table {
+	width: 100%;
+	border-collapse: collapse;
+	margin-top: 6px;
+	font-size: 0.85rem;
+}
+.viz-table th,
+.viz-table td {
+	padding: 4px 6px;
+	border-bottom: 1px solid var(--border);
+	text-align: right;
+}
+.viz-table th[scope='row'],
+.viz-table thead th:first-child {
+	text-align: left;
+}
+
+.db-closed {
+	position: sticky;
+	top: 0;
+	z-index: 40;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	margin: 8px var(--gutter) 0;
+}
+kbd {
+	font: inherit;
+	font-size: 0.85rem;
+	font-weight: 700;
+	padding: 1px 7px;
+	border: 1px solid var(--border);
+	border-bottom-width: 2px;
+	border-radius: 6px;
+	background: var(--surface-2);
+}
+
+.bulkbar-spacer {
+	height: 130px;
+}
+
+/* csoportos kijelölés közben a + gomb nem takarja a műveletsávot */
+body:has(.bulkbar) .fab {
+	display: none;
 }

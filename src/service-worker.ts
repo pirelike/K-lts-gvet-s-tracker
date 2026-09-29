@@ -53,3 +53,60 @@ sw.addEventListener('fetch', (event) => {
 		})()
 	);
 });
+
+// --- emlékeztető-értesítések (lásd src/lib/notify.ts) ---
+
+/** A beállításokat közvetlenül az IndexedDB-ből olvassa; az adatbázist nem hozza létre és nem frissíti. */
+async function readReminderSettings(): Promise<{ enabled?: boolean; dailyTime?: string | null } | null> {
+	const db = await new Promise<IDBDatabase | null>((resolve) => {
+		const req = indexedDB.open('koltsegvetes');
+		// Ha még nincs adatbázis, ne jöjjön létre üresen (az app később a saját sémájával hozza létre).
+		req.onupgradeneeded = () => req.transaction?.abort();
+		req.onsuccess = () => resolve(req.result);
+		req.onerror = () => resolve(null);
+	});
+	if (!db) return null;
+	try {
+		if (!db.objectStoreNames.contains('meta')) return null;
+		const row = await new Promise<{ value?: { reminders?: { enabled?: boolean; dailyTime?: string | null } } } | undefined>((resolve) => {
+			const r = db.transaction('meta').objectStore('meta').get('settings');
+			r.onsuccess = () => resolve(r.result);
+			r.onerror = () => resolve(undefined);
+		});
+		return row?.value?.reminders ?? null;
+	} finally {
+		db.close();
+	}
+}
+
+sw.addEventListener('periodicsync', (event) => {
+	const e = event as Event & { tag: string; waitUntil(p: Promise<unknown>): void };
+	if (e.tag !== 'daily-reminder') return;
+	e.waitUntil(
+		(async () => {
+			const settings = await readReminderSettings();
+			if (!settings?.enabled || !settings.dailyTime) return;
+			const [h, m] = settings.dailyTime.split(':').map(Number);
+			const now = new Date();
+			if (now.getHours() * 60 + now.getMinutes() < h * 60 + m) return;
+			// Ugyanaz a tag: egy napi emlékeztető nem halmozódik.
+			await sw.registration.showNotification('Költségvetés', {
+				body: 'Ne felejtsd rögzíteni a mai kiadásaidat.',
+				tag: 'daily',
+				icon: 'icons/icon-192.png'
+			});
+		})()
+	);
+});
+
+sw.addEventListener('notificationclick', (event) => {
+	event.notification.close();
+	event.waitUntil(
+		(async () => {
+			const clients = await sw.clients.matchAll({ type: 'window', includeUncontrolled: true });
+			const open = clients.find((c) => c.url.startsWith(SHELL));
+			if (open) return void (await open.focus());
+			await sw.clients.openWindow(SHELL);
+		})()
+	);
+});

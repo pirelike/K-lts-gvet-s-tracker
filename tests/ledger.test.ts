@@ -61,7 +61,7 @@ describe('főkönyv', () => {
 		expect(ledger.catById.get(food.id)!.archived).toBe(true);
 		await ledger.setCategoryArchived(food.id, false);
 
-		const unused = await ledger.addCategory('expense', { name: 'Ajándék', type: 'expense', color: '#123456', icon: '🎁' });
+		const unused = await ledger.addCategory('expense', { name: 'Ajándék', color: '#123456', icon: '🎁' });
 		await ledger.deleteCategory(unused.id);
 		expect(ledger.catById.has(unused.id)).toBe(false);
 	});

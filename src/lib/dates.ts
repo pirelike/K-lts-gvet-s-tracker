@@ -111,3 +111,57 @@ export function formatDayLabel(iso: string, today: string): string {
 	if (iso === addDays(today, -1)) return `Tegnap · ${formatDateLong(iso, today)}`;
 	return formatDateLong(iso, today);
 }
+
+/** Hónap hozzáadása: a nap a hónap végére igazodik (jan. 31. + 1 hónap = feb. 28./29.). */
+export function addMonths(iso: string, delta: number): string {
+	const [y, m, d] = iso.split('-').map(Number);
+	const idx = y * 12 + (m - 1) + delta;
+	const ny = Math.floor(idx / 12);
+	const nm = (idx % 12) + 1;
+	const last = new Date(Date.UTC(ny, nm, 0)).getUTCDate();
+	return `${ny}-${pad(nm)}-${pad(Math.min(d, last))}`;
+}
+
+/** Két nap közötti különbség napokban (b − a). */
+export function daysBetween(a: string, b: string): number {
+	const [ya, ma, da] = a.split('-').map(Number);
+	const [yb, mb, db] = b.split('-').map(Number);
+	return Math.round((Date.UTC(yb, mb - 1, db) - Date.UTC(ya, ma - 1, da)) / 86_400_000);
+}
+
+/** A hét napja hétfővel kezdve: hétfő = 0 … vasárnap = 6. */
+export function weekdayMon0(iso: string): number {
+	const [y, m, d] = iso.split('-').map(Number);
+	return (new Date(Date.UTC(y, m - 1, d)).getUTCDay() + 6) % 7;
+}
+
+const WEEKDAYS_MON0 = ['hétfő', 'kedd', 'szerda', 'csütörtök', 'péntek', 'szombat', 'vasárnap'];
+export const WEEKDAY_NAMES: readonly string[] = WEEKDAYS_MON0;
+export const WEEKDAY_SHORT: readonly string[] = ['H', 'K', 'Sze', 'Cs', 'P', 'Szo', 'V'];
+
+/** A hónapok neve (0 = január) a naptárhoz és a gyorsbevitelhez. */
+export const MONTH_NAMES: readonly string[] = MONTHS;
+
+/** Az adott nap ISO-ja a hónap `n`-edik napján (a hónap végére igazítva). */
+export function dayOfMonthISO(month: string, day: number): string {
+	return `${month}-${pad(Math.min(Math.max(day, 1), daysInMonth(month)))}`;
+}
+
+/** Ennyi ms múlva jön el a következő helyi éjfél (a „ma" frissítéséhez). */
+export function msUntilMidnight(now: Date = new Date()): number {
+	const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0, 0);
+	return Math.max(1000, next.getTime() - now.getTime());
+}
+
+/** A hónap első napjának hétfőtől számított oszlopa (0–6), a naptárrács igazításához. */
+export function monthStartOffset(month: string): number {
+	return weekdayMon0(`${month}-01`);
+}
+
+/** „szept. 29." rövid hónapnevek (0 = január). */
+export const MONTH_SHORT_NAMES: readonly string[] = MONTHS_SHORT;
+
+/** „szept." – csak a hónap rövid neve. */
+export function formatMonthShort(month: string): string {
+	return MONTHS_SHORT[Number(month.slice(5, 7)) - 1] ?? month;
+}
