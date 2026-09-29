@@ -35,7 +35,7 @@ Mivel nincs szerveroldali kód, az `build/` mappa **bármilyen statikus tárhely
 
 - GitHub Pages, Netlify, Cloudflare Pages, saját szerver (Caddy / nginx + HTTPS)
 - **Ingyenes hosting:** a GitHub Pages (publikus repónál ingyenes), a Netlify, a Cloudflare Pages és a Vercel ingyenes csomagja is bőven elég egy statikus, néhány száz kB-os apphoz.
-- **Automatikus kiadás GitHub Pages-re:** a `.github/workflows/pages.yml` a főágra (`main`/`master`) érkező minden push után lefuttatja a típusellenőrzést és a teszteket, buildel, és kiadja az appot. Egyszeri beállítás: a repóban *Settings → Pages → Source: GitHub Actions*. A cím: `https://<felhasználó>.github.io/<repo-neve>/`.
+- **Automatikus kiadás GitHub Pages-re:** a `.github/workflows/pages.yml` a főágra (`main`/`master`) érkező minden push után lefuttatja a típusellenőrzést és a teszteket, buildel, és kiadja az appot. Egyszeri beállítás: a repóban *Settings → Pages → Source: **GitHub Actions*** (ne a „Deploy from a branch"): utóbbi esetén a Pages az app helyett csak a README-t jeleníti meg. A cím: `https://<felhasználó>.github.io/<repo-neve>/`.
 - Az útválasztás hash-alapú (`/#/tetelek`), ezért **nem kell** szerveroldali átirányítás (SPA fallback).
 - Ha almappából szolgálod ki (pl. GitHub Pages: `https://user.github.io/repo/`), build előtt add meg: `BASE_PATH=/repo npm run build`.
 - Telefonon a böngésző menüjéből: „Hozzáadás a főképernyőhöz" / „Alkalmazás telepítése".
