@@ -56,11 +56,29 @@ await page.fill('#description', 'kav');
 await page.waitForSelector('.suggest');
 const sugg = await page.locator('.suggest li').allInnerTexts();
 ok(sugg.some((t) => t.includes('Kávé')), `javaslatok: ${sugg.map(nb).join(' | ')}`);
-await page.locator('.suggest button', { hasText: 'Kávé' }).click();
+ok(await page.getAttribute('#description', 'aria-expanded') === 'true', 'combobox: aria-expanded=true');
+await page.locator('.suggest [role=option]', { hasText: 'Kávé' }).click();
 ok((await page.inputValue('#description')) === 'Kávé', 'a javaslat kitölti a leírást');
 ok(await page.locator('input[name=category]:checked').evaluate((el) => el.closest('label').innerText.includes('Étel')), 'kategória: Étel (korábbi használat alapján)');
 ok(await page.locator('legend:has-text("Kategória") .badge').count() === 1, '„javasolt" jelzés látszik');
 ok((await page.inputValue('#amount')) === '890', 'a már beírt összeg megmarad');
+
+step('autocomplete billentyűzettel: ↓ + Enter választ, Esc bezár');
+await page.fill('#description', 'kav');
+await page.waitForSelector('.suggest');
+await page.press('#description', 'ArrowDown');
+ok(await page.getAttribute('#description', 'aria-activedescendant') === 'desc-opt-0', '↓ az első javaslatra lép');
+ok(await page.locator('.suggest [role=option][aria-selected=true]').count() === 1, 'a kijelölt sor látszik');
+await page.press('#description', 'Escape');
+await page.waitForSelector('.suggest', { state: 'detached' });
+ok(true, 'Esc bezárja a listát');
+await page.press('#description', 'ArrowDown');
+await page.waitForSelector('.suggest');
+const firstSugg = await page.locator('.suggest [role=option]').first().locator('span').first().innerText();
+await page.press('#description', 'Enter');
+ok((await page.inputValue('#description')) === firstSugg, `Enter kiválasztja: ${firstSugg}`);
+ok(hash() === '#/new', 'Enter a javaslaton nem küldi el az űrlapot');
+await page.fill('#description', 'Kávé');
 
 step('mentés → főoldal + toast');
 await page.click('button:has-text("Mentés"):not([data-again])');
@@ -122,6 +140,27 @@ await page.click('button:has-text("Módosítások mentése")');
 await page.waitForSelector('.tx');
 ok(nb(await page.locator('.tx').first().innerText()).includes('4 321 Ft'), `módosított összeg látszik a listában (${firstTitle}: ${oldAmount} → 4321)`);
 
+step('mentetlen módosítás: Mégse előtt rákérdez');
+await page.locator('.tx').first().click();
+await page.waitForSelector('text=Tétel szerkesztése');
+await page.click('button:has-text("Mégse")');
+await page.waitForSelector('[data-testid=result-summary]');
+ok(true, 'változtatás nélkül a Mégse kérdés nélkül visszalép');
+await page.locator('.tx').first().click();
+await page.waitForSelector('text=Tétel szerkesztése');
+await page.fill('#amount', '777');
+let dialogs = [];
+page.once('dialog', (d) => { dialogs.push(d.message()); void d.dismiss(); });
+await page.click('button:has-text("Mégse")');
+await page.waitForTimeout(400);
+ok(dialogs.length === 1 && dialogs[0].includes('nincsenek mentve'), `rákérdez: ${dialogs[0]}`);
+ok((await page.locator('h1').innerText()) === 'Tétel szerkesztése' && hash().startsWith('#/transactions/'), 'a „Mégse" a kérdés elutasításakor az űrlapon marad');
+ok((await page.inputValue('#amount')) === '777', 'a beírt érték megmaradt');
+page.once('dialog', (d) => { dialogs.push(d.message()); void d.accept(); });
+await page.click('nav a:has-text("Tételek")');
+await page.waitForSelector('[data-testid=result-summary]');
+ok(dialogs.length === 2, 'a kérdés elfogadása után elnavigál (a módosítás elvetve)');
+
 step('törlés + visszavonás');
 const countText = async () => Number(nb(await page.locator('[data-testid=result-summary]').innerText()).match(/^(\d+)/)[1]);
 const n0 = await countText();
@@ -131,9 +170,45 @@ await page.click('button:has-text("Törlés")');
 await page.waitForSelector('.toast button:has-text("Visszavonás")');
 await page.waitForSelector('[data-testid=result-summary]');
 ok((await countText()) === n0 - 1, `törlés után eggyel kevesebb tétel (${n0} → ${n0 - 1})`);
+await page.hover('.toast:has-text("Tétel törölve")');
+ok(await page.locator('.toast.paused').count() === 1, 'a toast időzítője megáll, amíg rajta van az egér');
 await page.locator('.toast button:has-text("Visszavonás")').click();
 await page.waitForFunction((n) => /^(\d+)/.exec(document.querySelector('[data-testid=result-summary]').innerText)[1] == n, n0);
 ok((await countText()) === n0, 'visszavonás után újra megvan');
+
+step('aktív szűrők chipként, egyenként törölhetően');
+await page.click('nav a:has-text("Tételek")');
+await page.waitForSelector('[data-testid=result-summary]');
+await page.click('summary:has-text("Szűrők")');
+await page.selectOption('#f-acc', { label: 'Készpénz' });
+await page.waitForSelector('button.chip.removable');
+await page.fill('input[aria-label="Minimum összeg"]', '1000');
+await page.press('input[aria-label="Minimum összeg"]', 'Tab');
+await page.waitForFunction(() => document.querySelectorAll('button.chip.removable').length === 2);
+const chipTexts = (await page.locator('button.chip.removable').allInnerTexts()).map(nb);
+ok(chipTexts.includes('Készpénz') && chipTexts.includes('Min. 1 000 Ft'), `chipek: ${chipTexts.join(' | ')}`);
+await page.click('button.chip.removable:has-text("Készpénz")');
+await page.waitForFunction(() => !location.hash.includes('acc='));
+ok((await page.locator('button.chip.removable').allInnerTexts()).map(nb).join() === 'Min. 1 000 Ft', 'a × csak azt az egy szűrőt törli');
+await page.fill('#q', 'nincs ilyen tétel sehol');
+await page.waitForSelector('.empty a:has-text("Szűrők törlése")');
+await page.click('.empty a:has-text("Szűrők törlése")');
+await page.waitForFunction(() => !location.hash.includes('q=') && !location.hash.includes('min='));
+ok(await page.locator('button.chip.removable').count() === 0 && (await page.inputValue('#q')) === '', 'üres találatnál a „Szűrők törlése" mindent töröl');
+
+step('csúszó jelölő a választókon');
+// A jelölő (::before) a kijelölt elem alatt van: helye és szélessége egyezik (±1 px).
+const pillFits = () => page.locator('.seg[aria-label="Típus szűrő"]').evaluate((seg) => {
+	const a = seg.querySelector('a.active').getBoundingClientRect();
+	const s = seg.getBoundingClientRect();
+	const x = parseFloat(seg.style.getPropertyValue('--seg-x'));
+	const w = parseFloat(seg.style.getPropertyValue('--seg-w'));
+	return Math.abs(a.left - s.left - x) <= 1 && Math.abs(a.width - w) <= 1;
+});
+ok(await pillFits(), 'a jelölő a „Mind" alatt');
+await page.locator('.seg[aria-label="Típus szűrő"] a:has-text("Átvezetés")').click();
+await page.waitForFunction(() => location.hash.includes('type=transfer'));
+ok(await pillFits(), 'a jelölő átcsúszott az „Átvezetés" alá');
 
 // ---------- 4. átvezetés ----------
 step('átvezetés: egyenleg változik, havi kiadás nem');

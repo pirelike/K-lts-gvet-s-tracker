@@ -15,10 +15,13 @@
 </script>
 
 <script lang="ts">
+	import { beforeNavigate } from '$app/navigation';
 	import { addDays, todayISO } from '$lib/dates';
 	import { deleteTxWithUndo } from '$lib/actions';
 	import { ledger } from '$lib/ledger.svelte';
 	import { evaluateExpression, formatHuf } from '$lib/money';
+	import { ms } from '$lib/motion';
+	import { segIndicator } from '$lib/segIndicator';
 	import { go, goBack, href, query } from '$lib/nav';
 	import { knownDescriptions, lastUsed, suggestDescriptions, usedTags, type KnownDescription } from '$lib/queries';
 	import { fold } from '$lib/text';
@@ -26,6 +29,7 @@
 	import { TX_TYPE_LABEL, type Transaction } from '$lib/types';
 	import { validateTx, type TxField } from '$lib/validation';
 	import { onMount, tick, untrack } from 'svelte';
+	import { fly } from 'svelte/transition';
 
 	let { mode, initial, editing }: { mode: 'create' | 'edit'; initial: TxFormInitial; editing?: Transaction } = $props();
 	const init = untrack(() => initial);
@@ -67,7 +71,10 @@
 	let saving = $state(false);
 	let categoryTouched = $state(untrack(() => mode === 'edit') || init.categoryId != null);
 	let suggestedCategory = $state(false);
-	let descFocused = $state(false);
+	/** Leírás-javaslatok: nyitva-e a lista, és melyik sor van kijelölve (nyilakkal). */
+	let suggestOpen = $state(false);
+	let activeIndex = $state(-1);
+	let suggestEl = $state<HTMLElement>();
 
 	let amountEl: HTMLInputElement;
 	let today = $state(todayISO());
@@ -76,6 +83,7 @@
 	const suggestions = $derived<KnownDescription[]>(
 		type === 'transfer' ? [] : suggestDescriptions(known, type, description)
 	);
+	const showSuggest = $derived(suggestOpen && suggestions.length > 0);
 	const amountPreview = $derived(amount.trim() ? evaluateExpression(amount) : null);
 	const tagSuggestions = $derived.by(() => {
 		const present = new Set(tagsText.split(/[\s,;#]+/).map((t) => t.toLocaleLowerCase('hu')));
@@ -133,7 +141,30 @@
 		suggestedCategory = true;
 		accountId = s.accountId;
 		if (!amount.trim()) amount = String(s.amount);
-		descFocused = false;
+		closeSuggest();
+	}
+
+	function closeSuggest() {
+		suggestOpen = false;
+		activeIndex = -1;
+	}
+
+	/** Combobox-billentyűk: ↓/↑ lépked a javaslatok között, Enter választ, Esc bezár. */
+	function onDescKeydown(e: KeyboardEvent) {
+		if (e.isComposing) return;
+		const n = suggestions.length;
+		if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && n > 0) {
+			e.preventDefault();
+			suggestOpen = true;
+			if (e.key === 'ArrowDown') activeIndex = (activeIndex + 1) % n;
+			else activeIndex = activeIndex <= 0 ? n - 1 : activeIndex - 1;
+		} else if (e.key === 'Enter' && showSuggest && activeIndex >= 0) {
+			e.preventDefault();
+			pick(suggestions[activeIndex]);
+		} else if (e.key === 'Escape' && showSuggest) {
+			e.preventDefault();
+			closeSuggest();
+		}
 	}
 
 	async function insert(ch: string) {
@@ -152,6 +183,25 @@
 	onMount(() => {
 		amountEl?.focus();
 		if (init.amount) amountEl?.select();
+	});
+
+	// Mentetlen változtatások: navigáció előtt rákérdezünk, ha az űrlap eltér a kiinduló állapottól.
+	const snapshot = () =>
+		JSON.stringify([type, amount.trim(), date, description.trim(), categoryId, accountId, toAccountId, note.trim(), tagsText.trim()]);
+	let baseline = $state(untrack(snapshot));
+	const dirty = $derived(snapshot() !== baseline);
+	/** Sikeres mentés vagy törlés után szabadon továbbléphetünk. */
+	let leaving = false;
+
+	beforeNavigate((nav) => {
+		if (leaving || !dirty) return;
+		// Bezárás / újratöltés: a böngésző saját „Elhagyod az oldalt?" kérdése jelenik meg.
+		if (nav.type === 'leave') return nav.cancel();
+		const question =
+			mode === 'edit'
+				? 'A módosítások nincsenek mentve. Elveted őket?'
+				: 'Az új tétel nincs mentve. Elveted?';
+		if (!confirm(question)) nav.cancel();
 	});
 
 	async function onsubmit(e: SubmitEvent) {
@@ -178,6 +228,7 @@
 		try {
 			if (mode === 'edit' && editing) {
 				await ledger.updateTx(editing.id, res.value);
+				leaving = true;
 				toasts.show('Módosítások mentve');
 				goBack('/transactions');
 			} else {
@@ -191,10 +242,12 @@
 					categoryTouched = false;
 					suggestedCategory = false;
 					today = todayISO();
+					baseline = snapshot();
 					await tick();
 					amountEl.focus();
 					window.scrollTo({ top: 0 });
 				} else {
+					leaving = true;
 					await go('/');
 				}
 			}
@@ -207,9 +260,12 @@
 
 	async function remove() {
 		if (!editing) return;
+		leaving = true;
 		await deleteTxWithUndo(editing.id);
 		goBack('/transactions');
 	}
+
+	const TX_TYPES = ['expense', 'income', 'transfer'] as const;
 
 	const descLabel = $derived(
 		type === 'expense' ? 'Mire költöttél?' : type === 'income' ? 'Honnan jött?' : 'Megjegyzés (nem kötelező)'
@@ -220,8 +276,8 @@
 </script>
 
 <form class="stack" style="gap:18px" {onsubmit} novalidate>
-	<div class="seg" role="radiogroup" aria-label="Típus">
-		{#each ['expense', 'income', 'transfer'] as const as t}
+	<div class="seg" role="radiogroup" aria-label="Típus" use:segIndicator={TX_TYPES.indexOf(type)}>
+		{#each TX_TYPES as t}
 			<label class={`t-${t}`}>
 				<input type="radio" name="type" value={t} checked={type === t} onchange={() => setType(t)} />
 				{TX_TYPE_LABEL[t]}
@@ -269,20 +325,41 @@
 			maxlength="200"
 			placeholder={descPlaceholder}
 			bind:value={description}
-			onfocus={() => (descFocused = true)}
-			onblur={() => setTimeout(() => (descFocused = false), 150)}
-			oninput={() => (suggestedCategory = false)}
+			role="combobox"
+			aria-autocomplete="list"
+			aria-expanded={showSuggest}
+			aria-controls={showSuggest ? 'desc-suggest' : undefined}
+			aria-activedescendant={showSuggest && activeIndex >= 0 ? `desc-opt-${activeIndex}` : undefined}
+			onfocus={() => (suggestOpen = true)}
+			onblur={(e) => {
+				// Ha a fókusz mégis a listára kerülne (a mousedown ezt általában megakadályozza), maradjon nyitva.
+				if (!suggestEl?.contains(e.relatedTarget as Node | null)) closeSuggest();
+			}}
+			oninput={() => {
+				suggestedCategory = false;
+				suggestOpen = true;
+				activeIndex = -1;
+			}}
+			onkeydown={onDescKeydown}
 			aria-invalid={errors.description ? 'true' : undefined}
 		/>
 		{#if errors.description}<p class="error" role="alert">{errors.description}</p>{/if}
-		{#if descFocused && suggestions.length > 0}
-			<ul class="suggest" aria-label="Korábbi tételek">
-				{#each suggestions as s (s.folded + s.type)}
-					<li>
-						<button type="button" onmousedown={(e) => e.preventDefault()} onclick={() => pick(s)}>
-							<span>{s.description}</span>
-							<span class="muted small num">{formatHuf(s.amount)}</span>
-						</button>
+		{#if showSuggest}
+			<!-- A lista nem veszi el a fókuszt (mousedown), így a leírásmező blur-je azonnal bezárhatja. -->
+			<ul id="desc-suggest" class="suggest" role="listbox" aria-label="Korábbi tételek" bind:this={suggestEl} transition:fly={{ y: -6, duration: ms(140) }}>
+				{#each suggestions as s, i (s.folded + s.type)}
+					<!-- A billentyűzetet a leírásmező kezeli (combobox-minta). -->
+					<!-- svelte-ignore a11y_click_events_have_key_events -->
+					<li
+						id={`desc-opt-${i}`}
+						role="option"
+						tabindex="-1"
+						aria-selected={i === activeIndex}
+						onmousedown={(e) => e.preventDefault()}
+						onclick={() => pick(s)}
+					>
+						<span>{s.description}</span>
+						<span class="muted small num">{formatHuf(s.amount)}</span>
 					</li>
 				{/each}
 			</ul>

@@ -3,13 +3,14 @@
 	import Icon from '$lib/components/Icon.svelte';
 	import MonthPager from '$lib/components/MonthPager.svelte';
 	import TxRow from '$lib/components/TxRow.svelte';
-	import { formatDayLabel, isValidISODate, isValidMonth, monthOf, monthRange, todayISO } from '$lib/dates';
+	import { formatDateShort, formatDayLabel, isValidISODate, isValidMonth, monthOf, monthRange, todayISO } from '$lib/dates';
 	import { ledger } from '$lib/ledger.svelte';
 	import { formatHuf, formatNet, parseAmount } from '$lib/money';
 	import { go, href, query } from '$lib/nav';
+	import { segIndicator } from '$lib/segIndicator';
 	import { filterTransactions, groupByDay, summarize, usedTags, type TxFilters } from '$lib/queries';
 	import type { TxType } from '$lib/types';
-	import { untrack } from 'svelte';
+	import { tick, untrack } from 'svelte';
 
 	const LIMIT = 500;
 	const today = todayISO();
@@ -93,7 +94,7 @@
 			const v = key in patch ? patch[key] : sp.get(key);
 			next[key] = v === null || v === undefined || v === '' ? null : String(v);
 		}
-		void go(`/transactions${query(next)}`, { replaceState: true, keepFocus: true, noScroll: true });
+		return go(`/transactions${query(next)}`, { replaceState: true, keepFocus: true, noScroll: true });
 	}
 
 	let qInput = $state(untrack(() => sp.get('q') ?? ''));
@@ -114,8 +115,54 @@
 		}
 	});
 
-	function setPeriod(p: 'month' | 'range' | 'all') {
+	const PERIODS = ['month', 'range', 'all'] as const;
+	function setPeriod(p: (typeof PERIODS)[number]) {
 		update({ period: p, ...(p === 'month' ? { month, from: null, to: null } : {}) });
+	}
+
+	/** Minden szűrő és a keresés törlése; a hónap és az „Összes" időszak marad. */
+	const clearHref = $derived(
+		href(`/transactions${query({ month: sp.get('month'), period: sp.get('period') === 'all' ? 'all' : undefined })}`)
+	);
+
+	/** A „Szűrők" mögé rejtett aktív szűrők chipként, egyenként törölhetően. */
+	interface FilterChip {
+		key: string;
+		/** Képernyőolvasónak: mi ez a szűrő. */
+		kind: string;
+		label: string;
+		clear: Record<string, null>;
+	}
+	const chips = $derived.by<FilterChip[]>(() => {
+		const list: FilterChip[] = [];
+		if (categoryId) {
+			const c = ledger.catById.get(categoryId);
+			list.push({ key: 'cat', kind: 'Kategória', label: c ? `${c.icon} ${c.name}` : 'Ismeretlen kategória', clear: { cat: null } });
+		}
+		if (accountId) {
+			list.push({ key: 'acc', kind: 'Számla', label: ledger.accById.get(accountId)?.name ?? 'Ismeretlen számla', clear: { acc: null } });
+		}
+		if (tag) list.push({ key: 'tag', kind: 'Címke', label: `#${tag}`, clear: { tag: null } });
+		const min = amountParam('min');
+		const max = amountParam('max');
+		if (minRaw) list.push({ key: 'min', kind: 'Minimum összeg', label: `Min. ${min != null ? formatHuf(min) : minRaw}`, clear: { min: null } });
+		if (maxRaw) list.push({ key: 'max', kind: 'Maximum összeg', label: `Max. ${max != null ? formatHuf(max) : maxRaw}`, clear: { max: null } });
+		// A dátumhatár csak „Időszak" nézetben szűr; az utolsó törlésekor az időszak is automatikusra vált.
+		if (period !== 'range') return list;
+		if (from) list.push({ key: 'from', kind: 'Kezdő dátum', label: `Ettől: ${formatDateShort(from, today)}`, clear: to ? { from: null } : { from: null, period: null } });
+		if (to) list.push({ key: 'to', kind: 'Záró dátum', label: `Eddig: ${formatDateShort(to, today)}`, clear: from ? { to: null } : { to: null, period: null } });
+		return list;
+	});
+
+	const clearChips = () => update(Object.assign(period === 'range' ? { period: null } : {}, ...chips.map((c) => c.clear)));
+
+	let chipsEl = $state<HTMLElement>();
+	async function removeChip(chip: FilterChip, index: number) {
+		await update(chip.clear);
+		await tick();
+		// A fókusz a szomszédos chipre, ha már nincs több, a keresőmezőre kerül.
+		const rest = chipsEl?.querySelectorAll<HTMLElement>('button.chip');
+		(rest?.[Math.min(index, rest.length - 1)] ?? document.getElementById('q'))?.focus();
 	}
 
 	const monthHref = (m: string) =>
@@ -150,7 +197,7 @@
 			/>
 		</div>
 
-		<div class="seg" role="group" aria-label="Típus szűrő">
+		<div class="seg" role="group" aria-label="Típus szűrő" use:segIndicator={TYPE_FILTERS.findIndex((f) => f.value === type)}>
 			{#each TYPE_FILTERS as f}
 				<a
 					href={href(`/transactions${query({ q, type: f.value, cat: categoryId, acc: accountId, tag, min: minRaw, max: maxRaw, from, to, month: sp.get('month'), period: sp.get('period') })}`)}
@@ -214,12 +261,12 @@
 					</div>
 				</div>
 				{#if anyFilter}
-					<a class="btn small" href={href(`/transactions${query({ month: sp.get('month'), period: sp.get('period') === 'all' ? 'all' : undefined })}`)}>Szűrők törlése</a>
+					<a class="btn small" href={clearHref}>Szűrők törlése</a>
 				{/if}
 			</div>
 		</details>
 
-		<div class="seg" role="group" aria-label="Időszak">
+		<div class="seg" role="group" aria-label="Időszak" use:segIndicator={PERIODS.indexOf(period)}>
 			<button type="button" class="seg-btn" class:active={period === 'month'} onclick={() => setPeriod('month')}>Hónap</button>
 			<button type="button" class="seg-btn" class:active={period === 'range'} onclick={() => setPeriod('range')}>Időszak</button>
 			<button type="button" class="seg-btn" class:active={period === 'all'} onclick={() => setPeriod('all')}>Összes</button>
@@ -230,44 +277,62 @@
 		{/if}
 	</div>
 
-	<div class="row wrap muted" aria-live="polite" data-testid="result-summary">
-		<strong style="color:var(--text)">{totals.count} tétel</strong>
-		{#if totals.expense > 0}<span class="exp num">−{formatHuf(totals.expense)}</span>{/if}
-		{#if totals.income > 0}<span class="inc num">+{formatHuf(totals.income)}</span>{/if}
-		{#if totals.expense > 0 && totals.income > 0}<span class="num">= {formatNet(totals.net)}</span>{/if}
-		{#if totals.transferCount > 0}<span>· {totals.transferCount} átvezetés</span>{/if}
-	</div>
-
-	{#if results.length === 0}
-		<div class="card empty">
-			{#if ledger.transactions.length === 0}
-				Még nincs egyetlen tétel sem.
-			{:else if anyFilter}
-				Nincs a szűrésnek megfelelő tétel.
-			{:else}
-				Ebben a hónapban nincs tétel.
+	{#if chips.length > 0}
+		<div class="chips" role="group" aria-label="Aktív szűrők" bind:this={chipsEl}>
+			{#each chips as chip, i (chip.key)}
+				<button type="button" class="chip removable" aria-label={`Szűrő törlése: ${chip.kind}: ${chip.label}`} onclick={() => removeChip(chip, i)}>
+					<span>{chip.label}</span>
+					<Icon name="close" size={18} />
+				</button>
+			{/each}
+			{#if chips.length > 1}
+				<button type="button" class="btn ghost small" onclick={clearChips}>Összes törlése</button>
 			{/if}
 		</div>
-	{:else}
-		<div class="card flush">
-			{#each groups as g (g.date)}
-				<div class="day-head">
-					<span>{formatDayLabel(g.date, today)}</span>
-					{#if g.hasIncomeOrExpense}
-						<span class="num" class:inc={g.net > 0} class:exp={g.net < 0}>{formatNet(g.net)}</span>
-					{/if}
-				</div>
-				<ul class="list">
-					{#each g.items as tx (tx.id)}
-						<li><TxRow {tx} /></li>
-					{/each}
-				</ul>
-			{/each}
-		</div>
-		{#if results.length > LIMIT}
-			<p class="notice">Az első {LIMIT} tétel látszik a {results.length}-ból – szűkítsd a keresést.</p>
-		{/if}
 	{/if}
+
+	<!-- A hónapfüggő tartalom lapozáskor oldalra csúszik (app.css: .vt-month). -->
+	<div class="stack vt-month" style="gap:16px">
+		<div class="row wrap muted" aria-live="polite" data-testid="result-summary">
+			<strong style="color:var(--text)">{totals.count} tétel</strong>
+			{#if totals.expense > 0}<span class="exp num">−{formatHuf(totals.expense)}</span>{/if}
+			{#if totals.income > 0}<span class="inc num">+{formatHuf(totals.income)}</span>{/if}
+			{#if totals.expense > 0 && totals.income > 0}<span class="num">= {formatNet(totals.net)}</span>{/if}
+			{#if totals.transferCount > 0}<span>· {totals.transferCount} átvezetés</span>{/if}
+		</div>
+
+		{#if results.length === 0}
+			<div class="card empty">
+				{#if ledger.transactions.length === 0}
+					Még nincs egyetlen tétel sem.
+				{:else if anyFilter}
+					<p>Nincs a szűrésnek megfelelő tétel.</p>
+					<a class="btn small" href={clearHref} style="margin-top:12px">Szűrők törlése</a>
+				{:else}
+					Ebben a hónapban nincs tétel.
+				{/if}
+			</div>
+		{:else}
+			<div class="card flush">
+				{#each groups as g (g.date)}
+					<div class="day-head">
+						<span>{formatDayLabel(g.date, today)}</span>
+						{#if g.hasIncomeOrExpense}
+							<span class="num" class:inc={g.net > 0} class:exp={g.net < 0}>{formatNet(g.net)}</span>
+						{/if}
+					</div>
+					<ul class="list">
+						{#each g.items as tx (tx.id)}
+							<li><TxRow {tx} /></li>
+						{/each}
+					</ul>
+				{/each}
+			</div>
+			{#if results.length > LIMIT}
+				<p class="notice">Az első {LIMIT} tétel látszik a {results.length}-ból – szűkítsd a keresést.</p>
+			{/if}
+		{/if}
+	</div>
 </div>
 
 <style>
@@ -280,20 +345,5 @@
 		.grid-2 {
 			grid-template-columns: 1fr;
 		}
-	}
-	.seg-btn {
-		border: 0;
-		background: transparent;
-		min-height: 40px;
-		border-radius: 8px;
-		font-weight: 600;
-		font-size: 0.95rem;
-		color: var(--muted);
-		cursor: pointer;
-	}
-	.seg-btn.active {
-		background: var(--surface);
-		color: var(--text);
-		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
 	}
 </style>

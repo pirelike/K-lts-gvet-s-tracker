@@ -325,8 +325,14 @@ select[aria-invalid='true'] {
 	font-size: 0.875rem;
 }
 
-/* szegmentált választó (Kiadás / Bevétel / Átvezetés) */
+/*
+ * Szegmentált választó (Kiadás / Bevétel / Átvezetés, Hónap / Időszak / Összes).
+ * A kijelölést egy csúszó háttér (::before) jelzi; a helyét a `use:segIndicator` írja
+ * a `--seg-x` / `--seg-w` változóba (src/lib/segIndicator.ts).
+ */
 .seg {
+	position: relative;
+	isolation: isolate;
 	display: grid;
 	grid-auto-flow: column;
 	grid-auto-columns: 1fr;
@@ -335,14 +341,31 @@ select[aria-invalid='true'] {
 	padding: 3px;
 	gap: 3px;
 }
+.seg::before {
+	content: '';
+	position: absolute;
+	z-index: -1;
+	top: 3px;
+	bottom: 3px;
+	left: 0;
+	width: var(--seg-w, 0px);
+	transform: translateX(var(--seg-x, 0px));
+	border-radius: 8px;
+	background: var(--surface);
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
 .seg > label,
-.seg > a {
+.seg > a,
+.seg > button {
+	position: relative;
 	display: flex;
 	align-items: center;
 	justify-content: center;
 	min-height: 40px;
 	padding: 0 10px;
+	border: 0;
 	border-radius: 8px;
+	background: transparent;
 	font-weight: 600;
 	font-size: 0.95rem;
 	color: var(--muted);
@@ -351,17 +374,18 @@ select[aria-invalid='true'] {
 	text-decoration: none;
 }
 .seg > label:has(input:checked),
-.seg > a.active {
-	background: var(--surface);
+.seg > a.active,
+.seg > button.active {
 	color: var(--text);
-	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
 }
 .seg > label:has(input:checked).t-expense,
-.seg > a.active.t-expense {
+.seg > a.active.t-expense,
+.seg > button.active.t-expense {
 	color: var(--expense);
 }
 .seg > label:has(input:checked).t-income,
-.seg > a.active.t-income {
+.seg > a.active.t-income,
+.seg > button.active.t-income {
 	color: var(--income);
 }
 .seg input {
@@ -672,7 +696,15 @@ hr {
 	pointer-events: none;
 	padding: 0 var(--gutter);
 }
+.toast-region {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 8px;
+}
 .toast {
+	position: relative;
+	overflow: hidden;
 	pointer-events: auto;
 	display: flex;
 	align-items: center;
@@ -769,21 +801,18 @@ hr {
 	background: var(--surface);
 	box-shadow: var(--shadow);
 }
-.suggest button {
-	width: 100%;
+.suggest [role='option'] {
 	display: flex;
 	justify-content: space-between;
 	gap: 12px;
 	align-items: center;
 	padding: 10px;
 	min-height: 44px;
-	border: 0;
 	border-radius: 8px;
-	background: transparent;
 	cursor: pointer;
-	text-align: left;
 }
-.suggest button:hover {
+.suggest [role='option']:hover,
+.suggest [role='option'][aria-selected='true'] {
 	background: var(--surface-2);
 }
 
@@ -868,12 +897,167 @@ details.more > summary::-webkit-details-marker {
 	background: color-mix(in srgb, var(--warn) 16%, var(--surface));
 }
 
+/* aktív szűrők a tétellista felett */
+.chip.removable {
+	min-height: 36px;
+	padding: 0 6px 0 12px;
+	font-size: 0.9rem;
+	background: var(--primary-soft);
+	border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
+	color: var(--text);
+}
+.chip.removable svg {
+	color: var(--muted);
+}
+
+/* ---------- nyomásra adott visszajelzés ---------- */
+
+/* A sorok érintéskor kiemelődnek (mobilon a :hover nem működik). */
+.tx:active,
+.suggest [role='option']:active {
+	background: var(--surface-2);
+}
+
+/* ---------- mozgás: csak ha a rendszer nem kér csökkentett mozgást ---------- */
+
+.toast-timer {
+	display: none;
+}
+
 @media (prefers-reduced-motion: no-preference) {
 	.btn,
 	.chip,
-	.tx {
+	.tx,
+	.icon-btn,
+	.fab,
+	.nav a,
+	.seg > *,
+	.amount-helpers button,
+	.toast button,
+	.swatch {
 		transition:
 			background-color 0.12s,
-			border-color 0.12s;
+			border-color 0.12s,
+			color 0.2s,
+			transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+	}
+	/* Érintésre enyhe összehúzódás: gyorsan be, lassabban vissza. */
+	.btn:active:not(:disabled),
+	.chip:active,
+	.icon-btn:active,
+	.seg > :active,
+	.amount-helpers button:active,
+	.toast button:active,
+	.swatch:active {
+		transform: scale(0.97);
+		transition-duration: 0.06s;
+	}
+	.fab:active,
+	.nav a:active {
+		transform: scale(0.92);
+		transition-duration: 0.06s;
+	}
+
+	.seg[data-seg-ready]::before {
+		transition:
+			transform 0.28s cubic-bezier(0.3, 0.7, 0.2, 1),
+			width 0.28s cubic-bezier(0.3, 0.7, 0.2, 1);
+	}
+
+	/* A „Visszavonás" toast alján fogyó sáv mutatja a hátralévő időt; érintés/egérmutató alatt megáll. */
+	.toast-timer {
+		display: block;
+		position: absolute;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		height: 3px;
+		background: rgba(255, 255, 255, 0.5);
+		transform-origin: left;
+		animation: toast-countdown linear forwards;
+	}
+	.toast.paused .toast-timer {
+		animation-play-state: paused;
+	}
+
+	/* ---------- oldal- és hónapváltás (View Transitions API, lásd +layout.svelte) ---------- */
+
+	.nav {
+		view-transition-name: nav;
+	}
+	.fab {
+		view-transition-name: fab;
+	}
+	.toasts {
+		view-transition-name: toasts;
+	}
+	:root[data-vt^='month'] .vt-month {
+		view-transition-name: month;
+	}
+	:root[data-vt^='month'] .pager .label {
+		view-transition-name: month-label;
+	}
+	/* Átmenet közben is lehessen koppintani (pl. gyors lapozás a hónapok között). */
+	::view-transition {
+		pointer-events: none;
+	}
+	::view-transition-old(root),
+	::view-transition-new(root) {
+		animation-duration: 0.18s;
+	}
+	::view-transition-old(month),
+	::view-transition-new(month),
+	::view-transition-old(month-label),
+	::view-transition-new(month-label) {
+		mix-blend-mode: normal;
+	}
+	::view-transition-group(month) {
+		animation-duration: 0.26s;
+	}
+	:root[data-vt='month-next']::view-transition-old(month),
+	:root[data-vt='month-next']::view-transition-old(month-label) {
+		animation: 0.15s ease-in both vt-out-left;
+	}
+	:root[data-vt='month-next']::view-transition-new(month),
+	:root[data-vt='month-next']::view-transition-new(month-label) {
+		animation: 0.26s 0.04s cubic-bezier(0.2, 0.8, 0.2, 1) both vt-in-right;
+	}
+	:root[data-vt='month-prev']::view-transition-old(month),
+	:root[data-vt='month-prev']::view-transition-old(month-label) {
+		animation: 0.15s ease-in both vt-out-right;
+	}
+	:root[data-vt='month-prev']::view-transition-new(month),
+	:root[data-vt='month-prev']::view-transition-new(month-label) {
+		animation: 0.26s 0.04s cubic-bezier(0.2, 0.8, 0.2, 1) both vt-in-left;
+	}
+}
+
+@keyframes toast-countdown {
+	to {
+		transform: scaleX(0);
+	}
+}
+@keyframes vt-out-left {
+	to {
+		opacity: 0;
+		transform: translateX(-32px);
+	}
+}
+@keyframes vt-out-right {
+	to {
+		opacity: 0;
+		transform: translateX(32px);
+	}
+}
+@keyframes vt-in-right {
+	from {
+		opacity: 0;
+		transform: translateX(32px);
+	}
+}
+@keyframes vt-in-left {
+	from {
+		opacity: 0;
+		transform: translateX(-32px);
 	}
 }

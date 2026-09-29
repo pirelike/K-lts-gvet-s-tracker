@@ -6,6 +6,7 @@ Személyes, egyfelhasználós költségvetés-követő. Minden bevételt és kia
 
 - Magyar felület, HUF (egész számok, ezres tagolás)
 - Mobil-first, reszponzív, sötét mód a rendszerbeállítás szerint
+- Visszafogott animációk (nyomásra összehúzódó gombok, csúszó választók, oldal- és hónapváltás View Transitionnel); csökkentett mozgás beállításnál kikapcsolnak
 - Függőségmentes futásidő: a build kimenete csak HTML/JS/CSS
 
 ## Gyors indulás
@@ -56,12 +57,13 @@ Mivel nincs szerveroldali kód, az `build/` mappa **bármilyen statikus tárhely
 
 1. **Gyors felvitel**: összeg, típus (kiadás / bevétel / átvezetés), dátum (alapból ma), kategória, leírás, számla, címkék, megjegyzés.
    - Összegmező kifejezéssel: `1200+850`, `2*450`, `12k` / `3e` (= ezer), `1,5k`, `12 000`; élő előnézettel és gyorsbillentő gombokkal (`+ − × k`).
-   - Leírás-autocomplete a korábbi tételekből; választáskor a kategória, számla és összeg is kitöltődik.
+   - Leírás-autocomplete a korábbi tételekből (nyilakkal és Enterrel is választható); választáskor a kategória, számla és összeg is kitöltődik.
    - Kategóriajavaslat a leírás alapján (pl. korábban „Lidl" → Étel), okos alapértelmezések (utolsónak használt számla és kategória).
-   - Mentés és új tétel, másolás (csak az összeg/dátum módosul), törlés utáni **Visszavonás** (7 mp).
+   - Mentés és új tétel, másolás (csak az összeg/dátum módosul), törlés utáni **Visszavonás** (7 mp, fogyó sávval; érintés vagy egérmutató alatt az idő megáll).
+   - Mentetlen változtatásnál (Mégse, vissza gomb, menü) az app rákérdez, mielőtt eldobná.
 2. **Tranzakciólista**: napok szerint csoportosítva, napi részösszeggel, havi lapozással; szerkeszthető és törölhető.
 3. **Havi összesítő** a főoldalon: bevétel, kiadás, egyenleg, kiadások/bevételek kategóriánkénti bontása (százalék + sáv), az összes számla egyenlege, utolsó 5 tétel.
-4. **Keresés és szűrés**: élő keresés a leírásban és megjegyzésben (ékezet- és kisbetű-független, „kave" megtalálja a „Kávé"-t, több szó ÉS kapcsolattal), típus, kategória, számla, címke, dátum-időszak, összeghatár. A találatok összegével („23 tétel −19 600 Ft"). Keresés/szűrés közben az időszak automatikusan „Összes"-re vált, kézzel visszakapcsolható „Hónap"-ra.
+4. **Keresés és szűrés**: élő keresés a leírásban és megjegyzésben (ékezet- és kisbetű-független, „kave" megtalálja a „Kávé"-t, több szó ÉS kapcsolattal), típus, kategória, számla, címke, dátum-időszak, összeghatár. A találatok összegével („23 tétel −19 600 Ft"). Az aktív szűrők chipként látszanak a lista felett, egyenként ×-szel törölhetők. Keresés/szűrés közben az időszak automatikusan „Összes"-re vált, kézzel visszakapcsolható „Hónap"-ra.
 5. **Kategóriakezelés**: létrehozás, átnevezés, ikon és szín, archiválás.
 6. **Számlák és egyenleg**: számlánkénti aktuális egyenleg (kezdőegyenleg + bevételek − kiadások ± átvezetések), **átvezetés** számlák között.
 7. **Beállítások**: PIN módosítása, automatikus zárolás, JSON-mentés/visszatöltés, példaadatok betöltése/törlése, minden adat törlése.
@@ -113,7 +115,7 @@ scripts/make-icons.mjs           PNG ikonok újragenerálása (npm run icons, Pl
 ## Tesztek
 
 ```bash
-npm test             # 69 egység- és integrációs teszt (Vitest, fake-indexeddb)
+npm test             # 72 egység- és integrációs teszt (Vitest, fake-indexeddb)
 npm run check        # svelte-check / TypeScript
 ```
 
