@@ -19,7 +19,7 @@
 	import { addDays, todayISO } from '$lib/dates';
 	import { deleteTxWithUndo } from '$lib/actions';
 	import { ledger } from '$lib/ledger.svelte';
-	import { evaluateExpression, formatHuf } from '$lib/money';
+	import { evaluateExpression, formatMoney } from '$lib/money';
 	import { ms } from '$lib/motion';
 	import { segIndicator } from '$lib/segIndicator';
 	import { go, goBack, href, query } from '$lib/nav';
@@ -233,7 +233,7 @@
 				goBack('/transactions');
 			} else {
 				await ledger.addTx(res.value);
-				toasts.show(`Mentve: ${formatHuf(res.value.amount)}`);
+				toasts.show(`Mentve: ${formatMoney(res.value.amount)}`);
 				if (again) {
 					amount = '';
 					description = '';
@@ -308,7 +308,7 @@
 			{/each}
 			<span id="amount-help" class="hint" style="align-self:center">
 				{#if amountPreview?.ok}
-					= <strong class="num">{formatHuf(amountPreview.value)}</strong>
+					= <strong class="num">{formatMoney(amountPreview.value)}</strong>
 				{:else}
 					k = ezer
 				{/if}
@@ -361,7 +361,7 @@
 						onclick={() => pick(s)}
 					>
 						<span>{s.description}</span>
-						<span class="muted small num">{formatHuf(s.amount)}</span>
+						<span class="muted small num">{formatMoney(s.amount)}</span>
 					</li>
 				{/each}
 			</ul>

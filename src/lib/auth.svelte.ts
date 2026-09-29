@@ -2,6 +2,7 @@
  * Indítás és zárolás: az adatbázis megnyitása, első indításkor PIN beállítása,
  * későbbi indításkor PIN-bekérés, automatikus zárolás.
  */
+import { setActiveCurrency } from './currency';
 import { todayISO } from './dates';
 import { openLedgerDb } from './db/idb';
 import {
@@ -15,6 +16,7 @@ import {
 } from './db/pin';
 import { LedgerRepo } from './db/repo';
 import { ledger } from './ledger.svelte';
+import type { Prefs } from './types';
 
 export type Phase = 'boot' | 'unsupported' | 'error' | 'setup' | 'locked' | 'unlocked';
 
@@ -27,9 +29,31 @@ export const AUTO_LOCK_OPTIONS: { seconds: number; label: string }[] = [
 	{ seconds: -1, label: 'Soha (csak újraindításkor)' }
 ];
 
+/** Emlékeztető-értesítések beállításai (eszközönként, nem része a mentésnek). */
+export interface ReminderSettings {
+	enabled: boolean;
+	/** „HH:MM" – napi emlékeztető ideje; null = nincs napi emlékeztető. */
+	dailyTime: string | null;
+	/** Esedékes ismétlődő tételek. */
+	due: boolean;
+	/** Havi keret 80% / 100% átlépése. */
+	budget: boolean;
+	/** Régen volt biztonsági mentés. */
+	backup: boolean;
+}
+
+export const DEFAULT_REMINDERS: ReminderSettings = {
+	enabled: false,
+	dailyTime: '20:00',
+	due: true,
+	budget: true,
+	backup: true
+};
+
 interface Settings {
 	autoLockSeconds: number;
 	lastBackupAt?: number;
+	reminders?: ReminderSettings;
 }
 
 class Auth {
@@ -39,6 +63,11 @@ class Auth {
 	persisted = $state<boolean | null>(null);
 	/** Az utolsó JSON-mentés időpontja (epoch ms) – a mentés-emlékeztetőhöz. */
 	lastBackupAt = $state<number | null>(null);
+	reminders = $state<ReminderSettings>({ ...DEFAULT_REMINDERS });
+	/** Az adatbázis frissítése egy másik lap miatt várakozik. */
+	blocked = $state(false);
+	/** Az adatbázis-kapcsolat lezárult (másik lap frissítette a sémát): újratöltés kell. */
+	dbClosed = $state(false);
 
 	private repo: LedgerRepo | null = null;
 	private pin: PinRecord | null = null;
@@ -53,7 +82,11 @@ class Auth {
 			return;
 		}
 		try {
-			const db = await openLedgerDb();
+			const db = await openLedgerDb(undefined, {
+				onBlocked: () => (this.blocked = true),
+				onClosed: () => (this.dbClosed = true)
+			});
+			this.blocked = false;
 			this.repo = new LedgerRepo(db);
 			ledger.attach(this.repo);
 			await this.repo.seedDefaultsIfNeeded();
@@ -62,7 +95,10 @@ class Auth {
 			if (settings) {
 				this.autoLockSeconds = settings.autoLockSeconds;
 				this.lastBackupAt = settings.lastBackupAt ?? null;
+				this.reminders = { ...DEFAULT_REMINDERS, ...settings.reminders };
 			}
+			// A pénznem már zároláskor ismert, így az első kirajzolás is jól formáz.
+			setActiveCurrency((await this.repo.getMeta<Prefs>('prefs'))?.currency);
 			this.phase = this.pin ? 'locked' : 'setup';
 			document.addEventListener('visibilitychange', () => this.onVisibility());
 		} catch (e) {
@@ -148,9 +184,22 @@ class Auth {
 	}
 
 	private async saveSettings() {
-		const s: Settings = { autoLockSeconds: this.autoLockSeconds };
+		const s: Settings = { autoLockSeconds: this.autoLockSeconds, reminders: { ...this.reminders } };
 		if (this.lastBackupAt != null) s.lastBackupAt = this.lastBackupAt;
 		await this.repo!.setMeta<Settings>('settings', s);
+	}
+
+	async setReminders(next: ReminderSettings) {
+		this.reminders = { ...next };
+		await this.saveSettings();
+	}
+
+	/** Egyszer megjelenített értesítések kulcsai (ne ismétlődjenek); a régi hónapok kulcsai törlődnek. */
+	async notifiedKeys(): Promise<Set<string>> {
+		return new Set((await this.repo?.getMeta<string[]>('notified')) ?? []);
+	}
+	async rememberNotified(keys: Set<string>) {
+		await this.repo?.setMeta('notified', [...keys].slice(-200));
 	}
 
 	async setAutoLock(seconds: number) {
@@ -171,6 +220,8 @@ class Auth {
 		this.pin = null;
 		this.autoLockSeconds = 60;
 		this.lastBackupAt = null;
+		this.reminders = { ...DEFAULT_REMINDERS };
+		setActiveCurrency('HUF');
 		await repo.seedDefaultsIfNeeded();
 		this.phase = 'setup';
 	}

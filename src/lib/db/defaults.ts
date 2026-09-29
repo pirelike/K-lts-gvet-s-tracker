@@ -29,7 +29,10 @@ export const DEFAULT_CATEGORIES: NewCategory[] = [
 ];
 
 export const DEFAULT_ACCOUNTS: NewAccount[] = [
-	{ name: 'Készpénz', initialBalance: 0, archived: false, sortOrder: 1 },
-	{ name: 'Bankkártya', initialBalance: 0, archived: false, sortOrder: 2 },
-	{ name: 'Megtakarítás', initialBalance: 0, archived: false, sortOrder: 3 }
+	{ name: 'Készpénz', type: 'cash', initialBalance: 0, archived: false, sortOrder: 1 },
+	{ name: 'Bankkártya', type: 'checking', initialBalance: 0, archived: false, sortOrder: 2 },
+	{ name: 'Megtakarítás', type: 'savings', initialBalance: 0, archived: false, sortOrder: 3 }
 ];
+
+/** Az egyenleg-egyeztetés korrekciós tételeinek kategóriája (kiadás és bevétel oldalon is létrejön, ha kell). */
+export const CORRECTION_CATEGORY = { name: 'Egyenleg-korrekció', icon: '⚖️', color: '#64748b' };

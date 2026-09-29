@@ -5,7 +5,7 @@
 	import TxRow from '$lib/components/TxRow.svelte';
 	import { formatDateShort, formatDayLabel, isValidISODate, isValidMonth, monthOf, monthRange, todayISO } from '$lib/dates';
 	import { ledger } from '$lib/ledger.svelte';
-	import { formatHuf, formatNet, parseAmount } from '$lib/money';
+	import { formatMoney, formatNet, parseAmount } from '$lib/money';
 	import { go, href, query } from '$lib/nav';
 	import { segIndicator } from '$lib/segIndicator';
 	import { filterTransactions, groupByDay, summarize, usedTags, type TxFilters } from '$lib/queries';
@@ -145,8 +145,8 @@
 		if (tag) list.push({ key: 'tag', kind: 'Címke', label: `#${tag}`, clear: { tag: null } });
 		const min = amountParam('min');
 		const max = amountParam('max');
-		if (minRaw) list.push({ key: 'min', kind: 'Minimum összeg', label: `Min. ${min != null ? formatHuf(min) : minRaw}`, clear: { min: null } });
-		if (maxRaw) list.push({ key: 'max', kind: 'Maximum összeg', label: `Max. ${max != null ? formatHuf(max) : maxRaw}`, clear: { max: null } });
+		if (minRaw) list.push({ key: 'min', kind: 'Minimum összeg', label: `Min. ${min != null ? formatMoney(min) : minRaw}`, clear: { min: null } });
+		if (maxRaw) list.push({ key: 'max', kind: 'Maximum összeg', label: `Max. ${max != null ? formatMoney(max) : maxRaw}`, clear: { max: null } });
 		// A dátumhatár csak „Időszak" nézetben szűr; az utolsó törlésekor az időszak is automatikusra vált.
 		if (period !== 'range') return list;
 		if (from) list.push({ key: 'from', kind: 'Kezdő dátum', label: `Ettől: ${formatDateShort(from, today)}`, clear: to ? { from: null } : { from: null, period: null } });
@@ -295,8 +295,8 @@
 	<div class="stack vt-month" style="gap:16px">
 		<div class="row wrap muted" aria-live="polite" data-testid="result-summary">
 			<strong style="color:var(--text)">{totals.count} tétel</strong>
-			{#if totals.expense > 0}<span class="exp num">−{formatHuf(totals.expense)}</span>{/if}
-			{#if totals.income > 0}<span class="inc num">+{formatHuf(totals.income)}</span>{/if}
+			{#if totals.expense > 0}<span class="exp num">−{formatMoney(totals.expense)}</span>{/if}
+			{#if totals.income > 0}<span class="inc num">+{formatMoney(totals.income)}</span>{/if}
 			{#if totals.expense > 0 && totals.income > 0}<span class="num">= {formatNet(totals.net)}</span>{/if}
 			{#if totals.transferCount > 0}<span>· {totals.transferCount} átvezetés</span>{/if}
 		</div>

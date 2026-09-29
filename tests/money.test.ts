@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { evaluateExpression, formatHuf, formatNumber, formatSignedHuf, parseAmount } from '../src/lib/money';
+import { evaluateExpression, formatMoney, formatNumber, formatSignedMoney, parseAmount } from '../src/lib/money';
 
 const val = (s: string) => {
 	const r = evaluateExpression(s);
@@ -74,11 +74,11 @@ describe('formázás', () => {
 		expect(formatNumber(1200)).toBe('1 200');
 		expect(formatNumber(1234567)).toBe('1 234 567');
 		expect(formatNumber(999)).toBe('999');
-		expect(formatHuf(18400)).toBe('18 400 Ft');
+		expect(formatMoney(18400)).toBe('18 400 Ft');
 	});
 	it('előjeles megjelenítés', () => {
-		expect(formatSignedHuf('income', 5000)).toBe('+5 000 Ft');
-		expect(formatSignedHuf('expense', 5000)).toBe('−5 000 Ft');
-		expect(formatSignedHuf('transfer', 5000)).toBe('5 000 Ft');
+		expect(formatSignedMoney('income', 5000)).toBe('+5 000 Ft');
+		expect(formatSignedMoney('expense', 5000)).toBe('−5 000 Ft');
+		expect(formatSignedMoney('transfer', 5000)).toBe('5 000 Ft');
 	});
 });

@@ -6,7 +6,7 @@
 	import TxRow from '$lib/components/TxRow.svelte';
 	import { isValidMonth, monthOf, todayISO } from '$lib/dates';
 	import { ledger } from '$lib/ledger.svelte';
-	import { formatHuf, formatNet } from '$lib/money';
+	import { formatMoney, formatNet } from '$lib/money';
 	import { href, query } from '$lib/nav';
 	import { accountBalances, compareTx, monthSummary } from '$lib/queries';
 
@@ -48,11 +48,11 @@
 		<div class="stats" aria-label="Havi összesítő">
 			<div class="stat">
 				<div class="label">Bevétel</div>
-				<div class="value inc">+{formatHuf(summary.income)}</div>
+				<div class="value inc">+{formatMoney(summary.income)}</div>
 			</div>
 			<div class="stat">
 				<div class="label">Kiadás</div>
-				<div class="value exp">−{formatHuf(summary.expense)}</div>
+				<div class="value exp">−{formatMoney(summary.expense)}</div>
 			</div>
 			<div class="stat">
 				<div class="label">Egyenleg</div>
@@ -98,7 +98,7 @@
 									<span class="row">
 										<span class="dot" style:--dot={c.color}></span>
 										<span class="grow ellipsis"><span aria-hidden="true">{c.icon}</span> {c.name}</span>
-										<span class="num nowrap"><strong>{formatHuf(c.amount)}</strong></span>
+										<span class="num nowrap"><strong>{formatMoney(c.amount)}</strong></span>
 										<span class="muted small num" style="width:3.2em;text-align:right">{Math.round(c.share * 100)}%</span>
 									</span>
 									<span class="bar" style:--dot={c.color}><span style:width={`${Math.max(2, c.share * 100)}%`}></span></span>
@@ -116,7 +116,7 @@
 									<a class="row" style="color:inherit;text-decoration:none;padding:10px 0" href={href(`/transactions${query({ month, cat: c.categoryId, type: 'income' })}`)}>
 										<span class="dot" style:--dot={c.color}></span>
 										<span class="grow"><span aria-hidden="true">{c.icon}</span> {c.name}</span>
-										<strong class="num inc">+{formatHuf(c.amount)}</strong>
+										<strong class="num inc">+{formatMoney(c.amount)}</strong>
 									</a>
 								</li>
 							{/each}
@@ -135,12 +135,12 @@
 						{@const b = balances.get(a.id) ?? 0}
 						<li class="row" style="padding:8px 0">
 							<span class="grow">{a.name}</span>
-							<strong class="num" class:exp={b < 0}>{formatHuf(b)}</strong>
+							<strong class="num" class:exp={b < 0}>{formatMoney(b)}</strong>
 						</li>
 					{/each}
 					<li class="row" style="padding:10px 0">
 						<span class="grow muted">Összesen</span>
-						<strong class="num" class:exp={totalBalance < 0}>{formatHuf(totalBalance)}</strong>
+						<strong class="num" class:exp={totalBalance < 0}>{formatMoney(totalBalance)}</strong>
 					</li>
 				</ul>
 			</section>

@@ -33,13 +33,16 @@ export function cryptoAvailable(): boolean {
 	return typeof crypto !== 'undefined' && !!crypto.subtle;
 }
 
-const toB64 = (buf: ArrayBuffer | Uint8Array) => {
+export const toB64 = (buf: ArrayBuffer | Uint8Array) => {
 	const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+	// Darabokban, hogy nagy (több MB-os) mentésnél se legyen lassú vagy túl mély a hívási verem.
 	let s = '';
-	for (const b of bytes) s += String.fromCharCode(b);
+	for (let i = 0; i < bytes.length; i += 0x8000) {
+		s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+	}
 	return btoa(s);
 };
-const fromB64 = (b64: string) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+export const fromB64 = (b64: string) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
 
 async function derive(pin: string, salt: Uint8Array, iterations: number): Promise<string> {
 	const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(pin), 'PBKDF2', false, [

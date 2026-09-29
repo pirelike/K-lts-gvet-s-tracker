@@ -1,37 +1,55 @@
 /**
- * Pénzösszegek kezelése: HUF, egész számok.
+ * Pénzösszegek kezelése: egész számok a pénznem legkisebb egységében (HUF: forint, EUR: cent).
  *
  * Az összegmező kifejezést is elfogad: `1200+850`, `12k` (= 12 000), `3e` (= 3 000),
  * `1,5k`, `12 000`, `2*450`, `(1200+300)/3`. A szerver és a kliens ugyanezt a modult használja.
  */
+import { activeCurrency, scaleOf } from './currency';
 import { MAX_AMOUNT } from './types';
 
 const NBSP = ' ';
 
 export type EvalResult = { ok: true; value: number; plain: boolean } | { ok: false; error: string };
 
-/** 12345 -> "12 345" (nem törhető szóközzel), negatívnál valódi mínusz jellel. */
-export function formatNumber(n: number): string {
+/**
+ * 12345 -> "12 345" (nem törhető szóközzel), negatívnál valódi mínusz jellel.
+ * Tizedes pénznemnél (pl. EUR) az összeg a legkisebb egységben van: 1250 -> "12,50".
+ */
+export function formatNumber(n: number, decimals: number = activeCurrency().decimals): string {
 	const abs = Math.abs(Math.trunc(n));
-	const grouped = abs.toString().replace(/\B(?=(\d{3})+(?!\d))/g, NBSP);
-	return (n < 0 ? '−' : '') + grouped;
+	const scale = 10 ** decimals;
+	const whole = Math.floor(abs / scale);
+	let grouped = whole.toString().replace(/\B(?=(\d{3})+(?!\d))/g, NBSP);
+	if (decimals > 0) grouped += ',' + String(abs % scale).padStart(decimals, '0');
+	return (n < 0 ? '\u2212' : '') + grouped;
 }
 
-export function formatHuf(n: number): string {
-	return `${formatNumber(n)}${NBSP}Ft`;
+/** Összeg az aktív pénznemben: „12 345 Ft" vagy „12,50 €". */
+export function formatMoney(n: number): string {
+	return `${formatNumber(n)}${NBSP}${activeCurrency().symbol}`;
 }
 
-/** Előjeles megjelenítés: bevétel +, kiadás −, átvezetés előjel nélkül. */
-export function formatSignedHuf(type: 'income' | 'expense' | 'transfer', amount: number): string {
-	if (type === 'income') return `+${formatHuf(amount)}`;
-	if (type === 'expense') return `−${formatHuf(amount)}`;
-	return formatHuf(amount);
+/** Előjeles megjelenítés: bevétel/jóváírás +, kiadás −, átvezetés előjel nélkül. */
+export function formatSignedMoney(type: 'income' | 'expense' | 'transfer' | 'refund', amount: number): string {
+	if (type === 'income' || type === 'refund') return `+${formatMoney(amount)}`;
+	if (type === 'expense') return `\u2212${formatMoney(amount)}`;
+	return formatMoney(amount);
 }
 
 /** Nettó összeg (bevétel − kiadás) előjellel, pl. a napi részösszeghez. */
 export function formatNet(n: number): string {
-	if (n > 0) return `+${formatHuf(n)}`;
-	return formatHuf(n);
+	if (n > 0) return `+${formatMoney(n)}`;
+	return formatMoney(n);
+}
+
+/** Tömör alak grafikonokhoz és naptárhoz: 1 234 -> „1,2e", 1 500 000 -> „1,5M" (főegységben). */
+export function formatCompact(minor: number): string {
+	const major = Math.abs(minor) / scaleOf();
+	const sign = minor < 0 ? '\u2212' : '';
+	const one = (v: number) => (Math.round(v * 10) / 10).toString().replace('.', ',');
+	if (major >= 1_000_000) return `${sign}${one(major / 1_000_000)}M`;
+	if (major >= 1000) return `${sign}${one(major / 1000)}e`;
+	return sign + (activeCurrency().decimals === 0 ? String(Math.round(major)) : one(major));
 }
 
 type Token =
@@ -90,10 +108,10 @@ function tokenize(input: string): Token[] | null {
 class ParseError extends Error {}
 
 /**
- * Kifejezés kiértékelése egész számra kerekítve. Nem ellenőrzi az előjelet
- * (kezdőegyenlegnél lehet 0 vagy negatív is).
+ * Kifejezés kiértékelése; az eredmény az aktív pénznem legkisebb egysége, egész számra kerekítve
+ * (HUF: forint, EUR: cent). Nem ellenőrzi az előjelet (kezdőegyenlegnél lehet 0 vagy negatív is).
  */
-export function evaluateExpression(input: string): EvalResult {
+export function evaluateExpression(input: string, decimals: number = activeCurrency().decimals): EvalResult {
 	const text = input.trim();
 	if (!text) return { ok: false, error: 'Add meg az összeget' };
 	const tokens = tokenize(text);
@@ -160,11 +178,12 @@ export function evaluateExpression(input: string): EvalResult {
 	try {
 		const value = parseExpr();
 		if (pos !== tokens.length) return { ok: false, error: 'Érvénytelen összeg' };
-		if (!Number.isFinite(value) || Math.abs(value) > MAX_AMOUNT) {
+		const scaled = value * 10 ** decimals;
+		if (!Number.isFinite(scaled) || Math.abs(scaled) > MAX_AMOUNT) {
 			return { ok: false, error: 'Túl nagy összeg' };
 		}
 		const plain = tokens.length === 1 && tokens[0].t === 'num' && !tokens[0].suffixed;
-		return { ok: true, value: Math.round(value), plain };
+		return { ok: true, value: Math.round(scaled), plain };
 	} catch (e) {
 		if (e instanceof ParseError) return { ok: false, error: e.message };
 		throw e;
@@ -172,8 +191,8 @@ export function evaluateExpression(input: string): EvalResult {
 }
 
 /** Tranzakcióösszeg: pozitív egész szám kell. */
-export function parseAmount(input: string): EvalResult {
-	const r = evaluateExpression(input);
+export function parseAmount(input: string, decimals?: number): EvalResult {
+	const r = evaluateExpression(input, decimals);
 	if (!r.ok) return r;
 	if (r.value <= 0) return { ok: false, error: 'Az összegnek pozitívnak kell lennie' };
 	return r;

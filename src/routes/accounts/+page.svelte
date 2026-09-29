@@ -4,7 +4,7 @@
 	import Icon from '$lib/components/Icon.svelte';
 	import { href, query } from '$lib/nav';
 	import { ledger, LedgerError } from '$lib/ledger.svelte';
-	import { formatHuf } from '$lib/money';
+	import { formatMoney } from '$lib/money';
 	import { accountBalances, accountUsage } from '$lib/queries';
 	import { toasts } from '$lib/toast.svelte';
 	import type { Account } from '$lib/types';
@@ -38,11 +38,11 @@
 				<strong>{a.name}</strong>
 				{#if a.archived}<span class="badge">archivált</span>{/if}
 				<div class="muted small">
-					Kezdőegyenleg: {formatHuf(a.initialBalance)} ·
+					Kezdőegyenleg: {formatMoney(a.initialBalance)} ·
 					<a href={href(`/transactions${query({ acc: a.id })}`)}>{usage.get(a.id) ?? 0} tétel</a>
 				</div>
 			</div>
-			<strong class="num" style="font-size:1.25rem" class:exp={b < 0} data-testid={`balance-${a.name}`}>{formatHuf(b)}</strong>
+			<strong class="num" style="font-size:1.25rem" class:exp={b < 0} data-testid={`balance-${a.name}`}>{formatMoney(b)}</strong>
 		</div>
 		<div class="row wrap">
 			<button class="btn small" type="button" onclick={() => (editingId = editingId === a.id ? null : a.id)}>
@@ -87,7 +87,7 @@
 
 	<div class="card row">
 		<span class="grow muted">Összes egyenleg</span>
-		<strong class="num" style="font-size:1.35rem" class:exp={total < 0}>{formatHuf(total)}</strong>
+		<strong class="num" style="font-size:1.35rem" class:exp={total < 0}>{formatMoney(total)}</strong>
 	</div>
 
 	<ul class="stack" style="list-style:none;margin:0;padding:0">

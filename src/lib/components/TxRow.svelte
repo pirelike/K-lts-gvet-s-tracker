@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { formatDateShort, todayISO } from '$lib/dates';
 	import { ledger } from '$lib/ledger.svelte';
-	import { formatSignedHuf } from '$lib/money';
+	import { formatSignedMoney } from '$lib/money';
 	import { href } from '$lib/nav';
 	import type { Transaction } from '$lib/types';
 
@@ -30,6 +30,6 @@
 		<span class="tx-sub" style="display:block">{sub}</span>
 	</span>
 	<span class="tx-amount num" class:inc={tx.type === 'income'} class:exp={tx.type === 'expense'}>
-		{formatSignedHuf(tx.type, tx.amount)}
+		{formatSignedMoney(tx.type, tx.amount)}
 	</span>
 </a>
