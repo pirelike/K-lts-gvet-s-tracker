@@ -397,6 +397,23 @@ select[aria-invalid='true'] {
 	outline: 3px solid var(--focus);
 }
 
+/* Kiemelt változat (pl. gyors dátumgombok): a kijelölés az app színével, jól látszik sötét módban is. */
+.seg.accent {
+	background: var(--surface);
+	border: 1px solid var(--border);
+}
+.seg.accent::before {
+	background: var(--primary-soft);
+	box-shadow: inset 0 0 0 1.5px var(--primary);
+}
+.seg.accent > button {
+	min-height: 38px;
+	padding: 0 14px;
+}
+.seg.accent > button.active {
+	color: var(--primary);
+}
+
 /* csempék (kategória / számla választó) */
 .chips {
 	display: flex;

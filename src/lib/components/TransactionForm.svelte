@@ -266,6 +266,8 @@
 	}
 
 	const TX_TYPES = ['expense', 'income', 'transfer'] as const;
+	/** 0: a dátum ma, 1: tegnap, -1: egyéni dátum. */
+	const quickDate = $derived(date === today ? 0 : date === addDays(today, -1) ? 1 : -1);
 
 	const descLabel = $derived(
 		type === 'expense' ? 'Mire költöttél?' : type === 'income' ? 'Honnan jött?' : 'Megjegyzés (nem kötelező)'
@@ -437,8 +439,11 @@
 		<label for="date">Dátum</label>
 		<div class="row wrap">
 			<input id="date" type="date" bind:value={date} style="flex:1;min-width:150px" aria-invalid={errors.date ? 'true' : undefined} />
-			<button type="button" class="btn small" onclick={() => (date = today)}>Ma</button>
-			<button type="button" class="btn small" onclick={() => (date = addDays(today, -1))}>Tegnap</button>
+			<!-- Gyorsgombok: a mezővel azonos magasak, a kijelölt (ma / tegnap) kiemelve; egyéni dátumnál egyik sem. -->
+			<div class="seg accent" role="group" aria-label="Gyors dátum" style="flex:none;align-self:stretch" use:segIndicator={quickDate}>
+				<button type="button" class:active={quickDate === 0} aria-pressed={quickDate === 0} onclick={() => (date = today)}>Ma</button>
+				<button type="button" class:active={quickDate === 1} aria-pressed={quickDate === 1} onclick={() => (date = addDays(today, -1))}>Tegnap</button>
+			</div>
 		</div>
 		{#if errors.date}<p class="error" role="alert">{errors.date}</p>{/if}
 	</div>
