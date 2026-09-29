@@ -1,7 +1,7 @@
 <script lang="ts">
 	import '../app.css';
-	import { afterNavigate } from '$app/navigation';
-	import { route } from '$lib/route.svelte';
+	import { afterNavigate, onNavigate } from '$app/navigation';
+	import { route, viewTransitionKind } from '$lib/route.svelte';
 	import { auth } from '$lib/auth.svelte';
 	import AppLogo from '$lib/components/AppLogo.svelte';
 	import Icon from '$lib/components/Icon.svelte';
@@ -9,6 +9,7 @@
 	import NavBar from '$lib/components/NavBar.svelte';
 	import SetupScreen from '$lib/components/SetupScreen.svelte';
 	import Toaster from '$lib/components/Toaster.svelte';
+	import { monthOf, todayISO } from '$lib/dates';
 	import { href, markHistory } from '$lib/nav';
 	import { toasts } from '$lib/toast.svelte';
 	import { onMount } from 'svelte';
@@ -18,6 +19,8 @@
 	onMount(() => {
 		void auth.init();
 		watchForUpdates();
+		// iOS Safari csak akkor alkalmazza a :active állapotot érintésre, ha van touchstart-figyelő.
+		document.addEventListener('touchstart', () => {}, { passive: true });
 	});
 
 	// Új alkalmazásverzió: a service worker a háttérben települ, a frissítést a felhasználó indítja.
@@ -51,6 +54,29 @@
 	}
 	afterNavigate(({ from }) => {
 		if (from) markHistory();
+	});
+
+	// Oldalváltáskor finom áttűnés, hónapváltáskor csúszás a lapozás irányába (View Transitions API).
+	// Ahol a böngésző nem támogatja, vagy csökkentett mozgás van beállítva, az oldal azonnal vált.
+	let vtSeq = 0;
+	onNavigate((nav) => {
+		if (!document.startViewTransition || !nav.from || !nav.to || nav.willUnload) return;
+		if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+		const kind = viewTransitionKind(nav.from.url.hash, nav.to.url.hash, monthOf(todayISO()));
+		if (!kind) return;
+		const root = document.documentElement;
+		const seq = ++vtSeq;
+		root.dataset.vt = kind;
+		return new Promise<void>((resolve) => {
+			const transition = document.startViewTransition(async () => {
+				resolve();
+				await nav.complete;
+			});
+			const done = () => {
+				if (seq === vtSeq) delete root.dataset.vt;
+			};
+			transition.finished.then(done, done);
+		});
 	});
 
 	// A „+" gomb az űrlapokon felesleges.

@@ -4,6 +4,7 @@
  * változásakor a származtatott értékek is frissülnek.
  */
 import { page } from '$app/state';
+import { isValidMonth } from './dates';
 
 /** Az `#/utvonal?kulcs=ertek` alakú hash szétbontása. */
 export function parseHash(hash: string): { path: string; query: string } {
@@ -11,6 +12,31 @@ export function parseHash(hash: string): { path: string; query: string } {
 	const i = h.indexOf('?');
 	const path = (i < 0 ? h : h.slice(0, i)) || '/';
 	return { path: path.startsWith('/') ? path : `/${path}`, query: i < 0 ? '' : h.slice(i + 1) };
+}
+
+export type ViewTransitionKind = 'page' | 'month-next' | 'month-prev';
+
+/**
+ * Milyen átmenet illik két hash-útvonal közé: másik képernyő → áttűnés; ugyanazon a képernyőn
+ * másik hónap → csúszás a lapozás irányába; minden más (keresés, szűrők) → nincs átmenet.
+ * A `?month` nélküli nézet a mai hónapot mutatja (`currentMonth`).
+ */
+export function viewTransitionKind(
+	fromHash: string,
+	toHash: string,
+	currentMonth: string
+): ViewTransitionKind | null {
+	const a = parseHash(fromHash);
+	const b = parseHash(toHash);
+	if (a.path !== b.path) return 'page';
+	const month = (query: string) => {
+		const m = new URLSearchParams(query).get('month') ?? '';
+		return isValidMonth(m) ? m : currentMonth;
+	};
+	const ma = month(a.query);
+	const mb = month(b.query);
+	if (ma === mb) return null;
+	return mb > ma ? 'month-next' : 'month-prev';
 }
 
 class Route {

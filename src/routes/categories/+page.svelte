@@ -2,6 +2,7 @@
 	import CategoryForm from '$lib/components/CategoryForm.svelte';
 	import ConfirmButton from '$lib/components/ConfirmButton.svelte';
 	import { href, query } from '$lib/nav';
+	import { segIndicator } from '$lib/segIndicator';
 	import { ledger, LedgerError } from '$lib/ledger.svelte';
 	import { categoryUsage } from '$lib/queries';
 	import { toasts } from '$lib/toast.svelte';
@@ -77,7 +78,7 @@
 <div class="page">
 	<div class="page-head"><h1>Kategóriák</h1></div>
 
-	<div class="seg" role="group" aria-label="Kategória típusa">
+	<div class="seg" role="group" aria-label="Kategória típusa" use:segIndicator={tab === 'expense' ? 0 : 1}>
 		<button type="button" class="seg-btn t-expense" class:active={tab === 'expense'} onclick={() => { tab = 'expense'; editingId = null; }}>Kiadás</button>
 		<button type="button" class="seg-btn t-income" class:active={tab === 'income'} onclick={() => { tab = 'income'; editingId = null; }}>Bevétel</button>
 	</div>
@@ -123,25 +124,3 @@
 	{/if}
 </div>
 
-<style>
-	.seg-btn {
-		border: 0;
-		background: transparent;
-		min-height: 40px;
-		border-radius: 8px;
-		font-weight: 600;
-		font-size: 0.95rem;
-		color: var(--muted);
-		cursor: pointer;
-	}
-	.seg-btn.active {
-		background: var(--surface);
-		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
-	}
-	.seg-btn.active.t-expense {
-		color: var(--expense);
-	}
-	.seg-btn.active.t-income {
-		color: var(--income);
-	}
-</style>
