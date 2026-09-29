@@ -536,13 +536,13 @@
 					<div class="row wrap">
 						<button type="button" class="btn small" onclick={addSplitRow}>+ Újabb rész</button>
 						<button type="button" class="btn small ghost" onclick={stopSplit}>Nincs felosztás</button>
-						{#if splitLeft !== null}
-							<span class="hint grow" style="text-align:right" class:exp={splitLeft < 0}>
-								{splitLeft === 0 ? 'Minden elosztva' : splitLeft > 0 ? `Elosztatlan: ${formatMoney(splitLeft)}` : `Túl sok: ${formatMoney(-splitLeft)}`}
-							</span>
-						{/if}
 					</div>
-					<p class="hint">Az üresen hagyott összeg megkapja a maradékot.</p>
+					<p class="hint" role="status">
+						{#if splitLeft !== null}
+							<strong class:exp={splitLeft < 0}>{splitLeft === 0 ? 'Minden elosztva.' : splitLeft > 0 ? `Elosztatlan: ${formatMoney(splitLeft)}.` : `Túl sok: ${formatMoney(-splitLeft)}.`}</strong>
+						{/if}
+						Az üresen hagyott összeg megkapja a maradékot.
+					</p>
 				</div>
 				{#if errors.splits}<p class="error" role="alert">{errors.splits}</p>{/if}
 			{:else}

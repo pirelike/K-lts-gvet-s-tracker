@@ -315,3 +315,56 @@ describe('jóváírás a főkönyvben', () => {
 		expect(balance('Készpénz')).toBe(0);
 	});
 });
+
+describe('CSV-import a főkönyvben', () => {
+	it('a hiányzó kategóriák és számlák létrejönnek (csak amit a sorok használnak), a tételek egyben kerülnek be', async () => {
+		const { planImport, detectMapping } = await import('../src/lib/csvImport');
+		const H = ['Dátum', 'Típus', 'Összeg', 'Leírás', 'Kategória', 'Számla', 'Célszámla'];
+		const rows = [
+			H,
+			['2026-09-01', 'Kiadás', '-1200', 'Menza', 'Ebéd', 'OTP kártya', ''],
+			['2026-09-01', 'Kiadás', '-500', 'Kávé', 'Étel', 'Készpénz', ''],
+			['2026-09-02', 'Bevétel', '10000', 'Zsebpénz', 'Apu', 'OTP kártya', ''],
+			['2026-09-03', 'Átvezetés', '3000', '', '', 'OTP kártya', 'Készpénz'],
+			['2026-09-04', 'Kiadás', '-700', 'Duplikált', 'Ebéd', 'Készpénz', '']
+		];
+		await ledger.addTx(expense({ amount: 700, date: '2026-09-04', description: 'Duplikált' })); // ez már megvan (Étel/Készpénz)
+		const plan = planImport(
+			rows,
+			{ hasHeader: true, mapping: detectMapping(H, true), defaultAccountId: acc('Készpénz').id, createMissing: true, skipDuplicates: true, importTag: 'import' },
+			{ accounts: ledger.activeAccounts, categories: ledger.categories, transactions: ledger.transactions }
+		);
+		expect(plan.errors).toEqual([]);
+		expect(plan.duplicates).toBe(1); // ugyanaz a dátum, összeg, leírás és számla (a kategória nem számít)
+		const r = await ledger.importPlan(plan);
+		expect(r.accounts).toBe(1);
+		expect(r.categories).toBe(2); // Ebéd (kiadás), Apu (bevétel)
+		expect(ledger.accounts.some((a) => a.name === 'OTP kártya')).toBe(true);
+		expect(ledger.categories.some((c) => c.name === 'Ebéd' && c.type === 'expense')).toBe(true);
+		expect(ledger.categories.some((c) => c.name === 'Apu' && c.type === 'income')).toBe(true);
+		const menza = ledger.transactions.find((t) => t.description === 'Menza')!;
+		expect(menza).toMatchObject({ amount: 1200, type: 'expense', tags: ['import'] });
+		expect(ledger.catById.get(menza.categoryId!)!.name).toBe('Ebéd');
+		expect(ledger.accById.get(menza.accountId)!.name).toBe('OTP kártya');
+		const tr = ledger.transactions.find((t) => t.type === 'transfer')!;
+		expect(ledger.accById.get(tr.accountId)!.name).toBe('OTP kártya');
+		expect(ledger.accById.get(tr.toAccountId!)!.name).toBe('Készpénz');
+		await ledger.load();
+		expect(ledger.transactions.filter((t) => t.tags.includes('import'))).toHaveLength(4);
+	});
+
+	it('duplikátumot kihagyva nem hoz létre felesleges kategóriát', async () => {
+		const { planImport, detectMapping } = await import('../src/lib/csvImport');
+		const H = ['Dátum', 'Összeg', 'Leírás', 'Kategória', 'Számla'];
+		await ledger.addTx(expense({ amount: 700, date: '2026-09-04', description: 'Duplikált' }));
+		const plan = planImport(
+			[H, ['2026-09-04', '-700', 'Duplikált', 'Csak ehhez kellene', 'Készpénz']],
+			{ hasHeader: true, mapping: detectMapping(H, true), defaultAccountId: null, createMissing: true, skipDuplicates: true, importTag: '' },
+			{ accounts: ledger.activeAccounts, categories: ledger.categories, transactions: ledger.transactions }
+		);
+		expect(plan.duplicates).toBe(1);
+		const r = await ledger.importPlan(plan);
+		expect(r).toEqual({ added: 0, categories: 0, accounts: 0 });
+		expect(ledger.categories.some((c) => c.name === 'Csak ehhez kellene')).toBe(false);
+	});
+});

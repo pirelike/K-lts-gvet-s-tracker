@@ -24,6 +24,15 @@ const ok = (cond, msg) => { console.log(cond ? '  ✓' : '  ✗ FAIL:', msg); if
 const step = (s) => console.log('•', s);
 const nb = (s) => s.replace(/ /g, ' ').replace(/−/g, '-');
 const hash = () => new URL(page.url()).hash;
+// Telefonos nézetben az alsó sávban csak 5 elem van; a többi oldal a „Több" menün át érhető el.
+const settled = () => page.waitForFunction(() => !document.documentElement.dataset.vt);
+const goMore = async (label) => {
+	await page.click('nav a:has-text("Több")');
+	await page.waitForSelector('h1:has-text("Több")');
+	await settled(); // az oldalváltás animációja alatt a kattintás nem érne célba
+	await page.click(`ul.list a:has-text("${label}")`);
+	await settled();
+};
 
 await page.goto(BASE);
 await page.waitForSelector('#pin');
@@ -47,7 +56,7 @@ await page.fill('#amount', '12k');
 ok(nb(await page.locator('#amount-help').innerText()).includes('12 000 Ft'), '12k = 12 000 Ft');
 
 step('üres leírás → hiba');
-await page.click('button:has-text("Mentés"):not([data-again])');
+await page.click('button[type=submit].btn.primary');
 ok((await page.locator('#description ~ .error').textContent())?.includes('mire költöttél'), 'kötelező leírás kiadásnál');
 
 step('autocomplete + kategóriajavaslat');
@@ -81,7 +90,7 @@ ok(hash() === '#/new', 'Enter a javaslaton nem küldi el az űrlapot');
 await page.fill('#description', 'Kávé');
 
 step('mentés → főoldal + toast');
-await page.click('button:has-text("Mentés"):not([data-again])');
+await page.click('button[type=submit].btn.primary');
 await page.waitForSelector('.toast');
 ok(nb(await page.locator('.toast').innerText()).includes('Mentve: 890 Ft'), 'toast: Mentve: 890 Ft');
 ok(hash() === '' || hash() === '#/', `visszakerült a főoldalra (${hash()})`);
@@ -215,7 +224,7 @@ step('átvezetés: egyenleg változik, havi kiadás nem');
 await page.click('nav a:has-text("Főoldal")');
 await page.waitForSelector('.stats');
 const expBefore = nb(await page.locator('.stat').nth(1).innerText());
-await page.click('nav a:has-text("Számlák")');
+await goMore('Számlák');
 await page.waitForSelector('[data-testid^=balance-]');
 const bal = async (n) => nb(await page.locator(`[data-testid="balance-${n}"]`).innerText());
 const cashBefore = await bal('Készpénz'); const cardBefore = await bal('Bankkártya');
@@ -226,13 +235,13 @@ await page.locator('fieldset:has(legend:has-text("Honnan")) label.chip:has-text(
 await page.locator('fieldset:has(legend:has-text("Hová")) label.chip:has-text("Készpénz")').click();
 // azonos számla → hiba
 await page.locator('fieldset:has(legend:has-text("Hová")) label.chip:has-text("Bankkártya")').click();
-await page.click('button:has-text("Mentés"):not([data-again])');
+await page.click('button[type=submit].btn.primary');
 ok((await page.locator('.error').first().textContent())?.includes('nem lehet ugyanaz'), 'azonos forrás- és célszámla → hiba');
 await page.locator('fieldset:has(legend:has-text("Hová")) label.chip:has-text("Készpénz")').click();
-await page.click('button:has-text("Mentés"):not([data-again])');
+await page.click('button[type=submit].btn.primary');
 await page.waitForSelector('.stats');
 ok(nb(await page.locator('.stat').nth(1).innerText()) === expBefore, 'a havi kiadás nem változott az átvezetéstől');
-await page.click('nav a:has-text("Számlák")');
+await goMore('Számlák');
 await page.waitForSelector('[data-testid^=balance-]');
 const num = (s) => Number(s.replace(/[^\d-]/g, ''));
 ok(num(await bal('Készpénz')) === num(cashBefore) + 10000, `készpénz +10 000 (${cashBefore} → ${await bal('Készpénz')})`);
@@ -241,7 +250,7 @@ await page.screenshot({ path: SHOTS + '05-accounts.png', fullPage: true });
 
 // ---------- 5. kategóriák ----------
 step('kategóriák: létrehozás, használt nem törölhető');
-await page.click('nav a:has-text("Kategóriák")');
+await goMore('Kategóriák');
 await page.waitForSelector('text=Új kiadási kategória');
 await page.click('summary:has-text("Új kiadási kategória")');
 await page.fill('details input[type=text][maxlength="40"]', 'Ajándék');
@@ -261,7 +270,7 @@ await page.screenshot({ path: SHOTS + '06-categories.png', fullPage: true });
 
 // ---------- 6. mentés / visszatöltés ----------
 step('biztonsági mentés export → import');
-await page.click('nav a:has-text("Beállítások")');
+await goMore('Beállítások');
 await page.waitForSelector('text=Adatok és biztonsági mentés');
 const [dl] = await Promise.all([page.waitForEvent('download'), page.click('button:has-text("Mentés letöltése")')]);
 const file = path.join(SHOTS, 'backup-test.json');
@@ -326,7 +335,7 @@ await page.waitForSelector('.stats');
 await page.click('a.fab');
 await page.fill('#amount', '1500');
 await page.fill('#description', 'Offline kávé');
-await page.click('button:has-text("Mentés"):not([data-again])');
+await page.click('button[type=submit].btn.primary');
 await page.waitForSelector('.toast:has-text("Mentve")');
 ok(true, 'offline is felvihető tétel');
 await ctx.setOffline(false);

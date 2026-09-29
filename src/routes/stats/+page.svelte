@@ -151,7 +151,7 @@
 				{#if compare.length === 0}
 					<p class="muted">Erre a két hónapra nincs kiadás.</p>
 				{:else}
-					<table class="cmp">
+					<div class="scroll"><table class="cmp">
 						<thead>
 							<tr><th scope="col">Kategória</th><th scope="col" class="num">Ez a hónap</th><th scope="col" class="num">Előző</th><th scope="col" class="num">Változás</th></tr>
 						</thead>
@@ -170,7 +170,7 @@
 								</tr>
 							{/each}
 						</tbody>
-					</table>
+					</table></div>
 				{/if}
 			</section>
 		</div>
@@ -215,8 +215,10 @@
 						{#each analysis.merchants.slice(0, 8) as m, i}
 							<li>
 								<span class="muted num" style="width:1.6em">{i + 1}.</span>
-								<a class="grow ellipsis" href={href(`/transactions${query({ q: m.description, from: range.from, to: range.to, period: 'range', type: 'expense' })}`)}>{m.description}</a>
-								<span class="muted small nowrap">{m.count}× · átl. {formatMoney(Math.round(m.amount / m.count))}</span>
+								<span class="grow" style="min-width:0">
+									<a class="ellipsis" style="display:block" href={href(`/transactions${query({ q: m.description, from: range.from, to: range.to, period: 'range', type: 'expense' })}`)}>{m.description}</a>
+									<span class="muted small">{m.count}× · átlag {formatMoney(Math.round(m.amount / m.count))}</span>
+								</span>
 								<strong class="num nowrap">{formatMoney(m.amount)}</strong>
 							</li>
 						{/each}
@@ -251,10 +253,20 @@
 </div>
 
 <style>
+	.scroll {
+		overflow-x: auto;
+	}
 	.cmp {
 		width: 100%;
 		border-collapse: collapse;
-		font-size: 0.9rem;
+		font-size: 0.88rem;
+	}
+	.cmp th[scope='row'] {
+		min-width: 9em;
+	}
+	.cmp td,
+	.cmp thead th:not(:first-child) {
+		white-space: nowrap;
 	}
 	.cmp th,
 	.cmp td {

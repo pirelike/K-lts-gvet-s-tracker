@@ -15,7 +15,8 @@
 		"test": "vitest run",
 		"test:watch": "vitest",
 		"icons": "node scripts/make-icons.mjs",
-		"e2e": "node e2e/smoke.mjs"
+		"e2e": "node e2e/smoke.mjs",
+		"e2e:features": "node e2e/features.mjs"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-static": "^3.0.10",

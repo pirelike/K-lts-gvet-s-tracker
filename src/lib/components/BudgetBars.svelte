@@ -29,7 +29,6 @@
 			>
 				<span class="row">
 					<span class="grow ellipsis"><span aria-hidden="true">{l.icon}</span> <strong>{l.name}</strong></span>
-					<span class="num small nowrap">{formatMoney(l.spent)} / {formatMoney(l.budget)}</span>
 					<span class="pct num" class:warn={l.level === 'warn'} class:over={l.level === 'over'}>{Math.round(l.ratio * 100)}%</span>
 				</span>
 				<span
@@ -46,9 +45,12 @@
 						<span class="meter-pace" style:left={`${pace * 100}%`} title="A hónap eddig eltelt része"></span>
 					{/if}
 				</span>
-				<span class="small" class:muted={l.level === 'ok'} class:over-text={l.level === 'over'} class:warn-text={l.level === 'warn'}>
-					{#if l.level !== 'ok'}<span aria-hidden="true">{l.level === 'over' ? '⚠' : '!'}</span>{/if}
-					{status(l)}
+				<span class="row wrap small" style="gap:2px 10px">
+					<span class="num">{formatMoney(l.spent)} / {formatMoney(l.budget)}</span>
+					<span class:muted={l.level === 'ok'} class:over-text={l.level === 'over'} class:warn-text={l.level === 'warn'}>
+						{#if l.level !== 'ok'}<span aria-hidden="true">{l.level === 'over' ? '⚠' : '!'}</span>{/if}
+						{status(l)}
+					</span>
 				</span>
 			</svelte:element>
 		</li>

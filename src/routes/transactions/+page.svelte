@@ -15,7 +15,7 @@
 	import { filterTransactions, groupByDay, summarize, usedTags, type TxFilters } from '$lib/queries';
 	import { toasts } from '$lib/toast.svelte';
 	import { TX_TYPE_LABEL, type TxType } from '$lib/types';
-	import { tick, untrack } from 'svelte';
+	import { onDestroy, tick, untrack } from 'svelte';
 
 	/** Ennyi tétel jelenik meg egyszerre; a „Továbbiak betöltése" gomb újabb részt tölt be. */
 	const PAGE = 100;
@@ -201,6 +201,8 @@
 	let qInput = $state(untrack(() => sp.get('q') ?? ''));
 	let pushedQ = untrack(() => sp.get('q') ?? '');
 	let timer: ReturnType<typeof setTimeout> | undefined;
+	// Ha közben más oldalra lépünk, a függő keresés-frissítés ne dobjon vissza ide.
+	onDestroy(() => clearTimeout(timer));
 	function onSearchInput() {
 		clearTimeout(timer);
 		timer = setTimeout(() => {
@@ -483,6 +485,8 @@
 </div>
 
 {#if selecting}
+	<!-- Hely a rögzített műveletsávnak, hogy a lista alja is elérhető maradjon. -->
+	<div class="bulkbar-spacer" aria-hidden="true"></div>
 	<div class="bulkbar" role="region" aria-label="Csoportos műveletek" data-testid="bulk-bar">
 		<div class="row wrap">
 			<strong>{selected.size} kijelölve</strong>
