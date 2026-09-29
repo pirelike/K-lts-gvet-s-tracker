@@ -1,0 +1,32 @@
+{
+	"name": "koltsegvetes-tracker",
+	"version": "0.1.0",
+	"private": true,
+	"description": "Személyes költségvetés-követő: offline, szerver nélküli PWA (SvelteKit + IndexedDB)",
+	"type": "module",
+	"engines": {
+		"node": ">=22.12"
+	},
+	"scripts": {
+		"dev": "vite dev",
+		"build": "vite build",
+		"preview": "vite preview",
+		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"icons": "node scripts/make-icons.mjs",
+		"e2e": "node e2e/smoke.mjs"
+	},
+	"devDependencies": {
+		"@sveltejs/adapter-static": "^3.0.10",
+		"@sveltejs/kit": "^2.70.3",
+		"@sveltejs/vite-plugin-svelte": "^7.3.1",
+		"@types/node": "^22.20.4",
+		"fake-indexeddb": "^6.2.5",
+		"svelte": "^5.57.1",
+		"svelte-check": "^4.7.6",
+		"typescript": "~5.9.3",
+		"vite": "^8.3.1",
+		"vitest": "^5.0.2"
+	}
+}
