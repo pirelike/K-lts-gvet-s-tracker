@@ -10,7 +10,8 @@
 	});
 </script>
 
-<dialog bind:this={dialog} class="shortcuts" aria-labelledby="sc-title" onclose={() => (open = false)}
+<dialog bind:this={dialog} class="shortcuts" aria-labelledby="sc-title" oncancel={() => (open = false)}
+	onclose={() => (open = false)}
 	onclick={(e) => e.target === dialog && (open = false)}>
 	<div class="stack">
 		<div class="row">

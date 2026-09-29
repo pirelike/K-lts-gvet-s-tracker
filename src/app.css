@@ -1313,3 +1313,8 @@ kbd {
 .bulkbar-spacer {
 	height: 130px;
 }
+
+/* csoportos kijelölés közben a + gomb nem takarja a műveletsávot */
+body:has(.bulkbar) .fab {
+	display: none;
+}

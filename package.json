@@ -1,6 +1,6 @@
 {
 	"name": "koltsegvetes-tracker",
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"private": true,
 	"description": "Személyes költségvetés-követő: offline, szerver nélküli PWA (SvelteKit + IndexedDB)",
 	"type": "module",

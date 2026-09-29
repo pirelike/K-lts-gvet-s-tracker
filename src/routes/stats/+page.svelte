@@ -153,7 +153,7 @@
 				{:else}
 					<div class="scroll"><table class="cmp">
 						<thead>
-							<tr><th scope="col">Kategória</th><th scope="col" class="num">Ez a hónap</th><th scope="col" class="num">Előző</th><th scope="col" class="num">Változás</th></tr>
+							<tr><th scope="col">Kategória</th><th scope="col" class="num">Most</th><th scope="col" class="num">Előző</th><th scope="col" class="num">Változás</th></tr>
 						</thead>
 						<tbody>
 							{#each compare as r (r.categoryId)}
@@ -259,10 +259,10 @@
 	.cmp {
 		width: 100%;
 		border-collapse: collapse;
-		font-size: 0.88rem;
+		font-size: 0.84rem;
 	}
 	.cmp th[scope='row'] {
-		min-width: 9em;
+		min-width: 6.5em;
 	}
 	.cmp td,
 	.cmp thead th:not(:first-child) {
