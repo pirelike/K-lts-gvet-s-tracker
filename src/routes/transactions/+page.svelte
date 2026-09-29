@@ -3,17 +3,23 @@
 	import Icon from '$lib/components/Icon.svelte';
 	import MonthPager from '$lib/components/MonthPager.svelte';
 	import TxRow from '$lib/components/TxRow.svelte';
-	import { formatDateShort, formatDayLabel, isValidISODate, isValidMonth, monthOf, monthRange, todayISO } from '$lib/dates';
+	import { deleteTxsWithUndo, updateTxsWithUndo } from '$lib/actions';
+	import { clock } from '$lib/clock.svelte';
+	import { transactionsToCsv } from '$lib/csvExport';
+	import { formatDateShort, formatDayLabel, isValidISODate, isValidMonth, monthOf, monthRange } from '$lib/dates';
+	import { downloadText } from '$lib/download';
 	import { ledger } from '$lib/ledger.svelte';
 	import { formatMoney, formatNet, parseAmount } from '$lib/money';
 	import { go, href, query } from '$lib/nav';
 	import { segIndicator } from '$lib/segIndicator';
 	import { filterTransactions, groupByDay, summarize, usedTags, type TxFilters } from '$lib/queries';
-	import type { TxType } from '$lib/types';
+	import { toasts } from '$lib/toast.svelte';
+	import { TX_TYPE_LABEL, type TxType } from '$lib/types';
 	import { tick, untrack } from 'svelte';
 
-	const LIMIT = 500;
-	const today = todayISO();
+	/** Ennyi tétel jelenik meg egyszerre; a „Továbbiak betöltése" gomb újabb részt tölt be. */
+	const PAGE = 100;
+	const today = $derived(clock.today);
 	const sp = $derived(route.params);
 
 	const num = (key: string) => {
@@ -34,7 +40,7 @@
 	const q = $derived(sp.get('q') ?? '');
 	const typeParam = $derived(sp.get('type'));
 	const type = $derived<TxType | ''>(
-		typeParam === 'income' || typeParam === 'expense' || typeParam === 'transfer' ? typeParam : ''
+		typeParam === 'income' || typeParam === 'expense' || typeParam === 'transfer' || typeParam === 'refund' ? typeParam : ''
 	);
 	const categoryId = $derived(num('cat'));
 	const accountId = $derived(num('acc'));
@@ -84,8 +90,103 @@
 
 	const results = $derived(filterTransactions(ledger.transactions, filters));
 	const totals = $derived(summarize(results));
-	const groups = $derived(groupByDay(results.slice(0, LIMIT)));
 	const tags = $derived(usedTags(ledger.transactions));
+
+	// --- „Továbbiak betöltése" ---
+	let visible = $state(PAGE);
+	// A szűrés, keresés vagy időszak változásakor újra az első oldal látszik.
+	const filterKey = $derived(JSON.stringify(filters));
+	$effect(() => {
+		filterKey;
+		untrack(() => (visible = PAGE));
+	});
+	const shown = $derived(results.slice(0, visible));
+	const groups = $derived(groupByDay(shown));
+	const remaining = $derived(Math.max(0, results.length - visible));
+
+	// --- csoportos műveletek ---
+	let selecting = $state(false);
+	let selected = $state<Set<number>>(new Set());
+	const selectedIds = $derived([...selected]);
+	function toggle(id: number) {
+		const next = new Set(selected);
+		if (next.has(id)) next.delete(id);
+		else next.add(id);
+		selected = next;
+	}
+	function stopSelecting() {
+		selecting = false;
+		selected = new Set();
+	}
+	// A szűrés változásakor csak a még látható találatok maradnak kijelölve.
+	$effect(() => {
+		const ids = new Set(results.map((t) => t.id));
+		untrack(() => {
+			if ([...selected].some((id) => !ids.has(id))) selected = new Set([...selected].filter((id) => ids.has(id)));
+		});
+	});
+	let bulkTag = $state('');
+	async function bulkCategory(e: Event & { currentTarget: HTMLSelectElement }) {
+		const id = Number(e.currentTarget.value);
+		e.currentTarget.value = '';
+		if (id) await updateTxsWithUndo(selectedIds, { categoryId: id }, 'Kategória módosítva');
+	}
+	async function bulkAccount(e: Event & { currentTarget: HTMLSelectElement }) {
+		const id = Number(e.currentTarget.value);
+		e.currentTarget.value = '';
+		if (id) await updateTxsWithUndo(selectedIds, { accountId: id }, 'Számla módosítva');
+	}
+	async function bulkAddTag() {
+		const tag = bulkTag.trim().replace(/^#/, '').toLocaleLowerCase('hu');
+		if (!tag) return;
+		if (await updateTxsWithUndo(selectedIds, { addTags: [tag] }, `#${tag} címke hozzáadva`)) bulkTag = '';
+	}
+	async function bulkDelete() {
+		const n = await deleteTxsWithUndo(selectedIds);
+		if (n > 0) stopSelecting();
+	}
+
+	// --- CSV-export a jelenlegi találatokról ---
+	function exportCsv() {
+		downloadText(`tetelek-${today}.csv`, transactionsToCsv(results, ledger.categories, ledger.accounts), 'text/csv;charset=utf-8');
+		toasts.show(`${results.length} tétel exportálva (CSV)`);
+	}
+
+	// --- mentett szűrők ---
+	/** A jelenlegi szűrő lekérdezése hónap nélkül (a „Hónap" időszak az alapértelmezett, azt nem mentjük). */
+	const currentQuery = $derived(
+		query({
+			q: q.trim(),
+			type,
+			cat: categoryId,
+			acc: accountId,
+			tag,
+			min: minRaw,
+			max: maxRaw,
+			from: period === 'range' ? from : '',
+			to: period === 'range' ? to : '',
+			period: period === 'month' ? '' : period
+		}).replace(/^\?/, '')
+	);
+	let filterName = $state('');
+	let filterError = $state('');
+	async function saveFilter() {
+		const name = filterName.trim();
+		if (!name) filterError = 'Adj nevet a szűrőnek';
+		else if (name.length > 40) filterError = 'A név legfeljebb 40 karakter lehet';
+		else if (ledger.filters.some((f) => f.name.toLocaleLowerCase('hu') === name.toLocaleLowerCase('hu'))) {
+			filterError = 'Már van ilyen nevű mentett szűrő';
+		} else filterError = '';
+		if (filterError) return;
+		try {
+			await ledger.addFilter(name, currentQuery);
+			toasts.show(`Szűrő mentve: ${name}`);
+			filterName = '';
+		} catch (e) {
+			filterError = e instanceof Error ? e.message : 'A mentés nem sikerült';
+		}
+	}
+	const normalize = (qs: string) => [...new URLSearchParams(qs).entries()].sort().map(([k, v]) => `${k}=${v}`).join('&');
 
 	// --- URL frissítése (a keresés élő, késleltetve) ---
 	function update(patch: Record<string, string | number | null>) {
@@ -143,6 +244,8 @@
 			list.push({ key: 'acc', kind: 'Számla', label: ledger.accById.get(accountId)?.name ?? 'Ismeretlen számla', clear: { acc: null } });
 		}
 		if (tag) list.push({ key: 'tag', kind: 'Címke', label: `#${tag}`, clear: { tag: null } });
+		// A jóváírás típus nincs a gyorsválasztón, ezért itt látszik, hogy aktív.
+		if (type === 'refund') list.push({ key: 'type', kind: 'Típus', label: TX_TYPE_LABEL.refund, clear: { type: null } });
 		const min = amountParam('min');
 		const max = amountParam('max');
 		if (minRaw) list.push({ key: 'min', kind: 'Minimum összeg', label: `Min. ${min != null ? formatMoney(min) : minRaw}`, clear: { min: null } });
@@ -212,6 +315,15 @@
 			<div class="stack" style="margin-top:8px">
 				<div class="grid-2">
 					<div class="field">
+						<label for="f-type">Típus</label>
+						<select id="f-type" value={type} onchange={(e) => update({ type: e.currentTarget.value })}>
+							<option value="">Mind</option>
+							{#each ['expense', 'income', 'refund', 'transfer'] as t}
+								<option value={t}>{TX_TYPE_LABEL[t as TxType]}</option>
+							{/each}
+						</select>
+					</div>
+					<div class="field">
 						<label for="f-cat">Kategória</label>
 						<select id="f-cat" value={categoryId ?? ''} onchange={(e) => update({ cat: e.currentTarget.value })}>
 							<option value="">Mind</option>
@@ -261,10 +373,34 @@
 					</div>
 				</div>
 				{#if anyFilter}
-					<a class="btn small" href={clearHref}>Szűrők törlése</a>
+					<div class="row wrap">
+						<a class="btn small" href={clearHref}>Szűrők törlése</a>
+					</div>
+					<div class="field">
+						<label for="filter-name">Szűrő mentése névvel</label>
+						<div class="row">
+							<input id="filter-name" type="text" maxlength="40" placeholder="pl. Kávék és menza" bind:value={filterName}
+								onkeydown={(e) => e.key === 'Enter' && (e.preventDefault(), saveFilter())} />
+							<button class="btn" type="button" onclick={saveFilter}>Mentés</button>
+						</div>
+						{#if filterError}<p class="error" role="alert">{filterError}</p>{/if}
+					</div>
 				{/if}
 			</div>
 		</details>
+
+		{#if ledger.filters.length > 0}
+			<div class="chips" role="group" aria-label="Mentett szűrők" data-testid="saved-filters">
+				{#each ledger.filters as f (f.id)}
+					<span class="chip removable saved" class:active={normalize(f.query) === normalize(currentQuery)}>
+						<a href={href(`/transactions${f.query ? '?' + f.query : ''}`)} class="saved-link">{f.name}</a>
+						<button type="button" class="chip-x" aria-label={`Mentett szűrő törlése: ${f.name}`} onclick={() => ledger.deleteFilter(f.id)}>
+							<Icon name="close" size={16} />
+						</button>
+					</span>
+				{/each}
+			</div>
+		{/if}
 
 		<div class="seg" role="group" aria-label="Időszak" use:segIndicator={PERIODS.indexOf(period)}>
 			<button type="button" class="seg-btn" class:active={period === 'month'} onclick={() => setPeriod('month')}>Hónap</button>
@@ -296,9 +432,18 @@
 		<div class="row wrap muted" aria-live="polite" data-testid="result-summary">
 			<strong style="color:var(--text)">{totals.count} tétel</strong>
 			{#if totals.expense > 0}<span class="exp num">−{formatMoney(totals.expense)}</span>{/if}
+			{#if totals.expense < 0}<span class="inc num">+{formatMoney(-totals.expense)}</span>{/if}
 			{#if totals.income > 0}<span class="inc num">+{formatMoney(totals.income)}</span>{/if}
-			{#if totals.expense > 0 && totals.income > 0}<span class="num">= {formatNet(totals.net)}</span>{/if}
+			{#if totals.expense !== 0 && totals.income > 0}<span class="num">= {formatNet(totals.net)}</span>{/if}
+			{#if totals.refund > 0 && totals.expense > 0}<span class="small">(jóváírással csökkentve)</span>{/if}
 			{#if totals.transferCount > 0}<span>· {totals.transferCount} átvezetés</span>{/if}
+			<span class="spacer"></span>
+			{#if results.length > 0}
+				<button type="button" class="btn small ghost" onclick={exportCsv} aria-label="Találatok exportálása CSV-be">CSV</button>
+				<button type="button" class="btn small" aria-pressed={selecting} onclick={() => (selecting ? stopSelecting() : (selecting = true))}>
+					{selecting ? 'Kész' : 'Kijelölés'}
+				</button>
+			{/if}
 		</div>
 
 		{#if results.length === 0}
@@ -322,18 +467,49 @@
 						{/if}
 					</div>
 					<ul class="list">
-						{#each g.items as tx (tx.id)}
-							<li><TxRow {tx} /></li>
-						{/each}
-					</ul>
-				{/each}
-			</div>
-			{#if results.length > LIMIT}
-				<p class="notice">Az első {LIMIT} tétel látszik a {results.length}-ból – szűkítsd a keresést.</p>
-			{/if}
+							{#each g.items as tx (tx.id)}
+								<li><TxRow {tx} selectable={selecting} selected={selected.has(tx.id)} ontoggle={toggle} /></li>
+							{/each}
+						</ul>
+					{/each}
+				</div>
+				{#if remaining > 0}
+					<button type="button" class="btn block" data-testid="load-more" onclick={() => (visible += PAGE)}>
+						Továbbiak betöltése (még {remaining} tétel)
+					</button>
+				{/if}
 		{/if}
 	</div>
 </div>
+
+{#if selecting}
+	<div class="bulkbar" role="region" aria-label="Csoportos műveletek" data-testid="bulk-bar">
+		<div class="row wrap">
+			<strong>{selected.size} kijelölve</strong>
+			<button type="button" class="btn small ghost" onclick={() => (selected = new Set(results.map((t) => t.id)))}>Mind ({results.length})</button>
+			<button type="button" class="btn small ghost" disabled={selected.size === 0} onclick={() => (selected = new Set())}>Kijelölés törlése</button>
+		</div>
+		<div class="row wrap">
+			<select aria-label="Kategória módosítása" disabled={selected.size === 0} onchange={bulkCategory}>
+				<option value="">Kategória…</option>
+				<optgroup label="Kiadás">
+					{#each ledger.activeCategories('expense') as c}<option value={c.id}>{c.icon} {c.name}</option>{/each}
+				</optgroup>
+				<optgroup label="Bevétel">
+					{#each ledger.activeCategories('income') as c}<option value={c.id}>{c.icon} {c.name}</option>{/each}
+				</optgroup>
+			</select>
+			<select aria-label="Számla módosítása" disabled={selected.size === 0} onchange={bulkAccount}>
+				<option value="">Számla…</option>
+				{#each ledger.activeAccounts as a}<option value={a.id}>{a.name}</option>{/each}
+			</select>
+			<input type="text" class="bulk-tag" placeholder="#címke" aria-label="Címke hozzáadása" disabled={selected.size === 0} bind:value={bulkTag}
+				onkeydown={(e) => e.key === 'Enter' && (e.preventDefault(), bulkAddTag())} />
+			<button type="button" class="btn small" disabled={selected.size === 0 || !bulkTag.trim()} onclick={bulkAddTag}>+ Címke</button>
+			<button type="button" class="btn small danger" disabled={selected.size === 0} onclick={bulkDelete}>Törlés</button>
+		</div>
+	</div>
+{/if}
 
 <style>
 	.grid-2 {
@@ -345,5 +521,26 @@
 		.grid-2 {
 			grid-template-columns: 1fr;
 		}
+	}
+	.saved-link {
+		color: inherit;
+		text-decoration: none;
+	}
+	.chip.saved.active {
+		border-color: var(--primary);
+		font-weight: 700;
+	}
+	.chip-x {
+		display: grid;
+		place-items: center;
+		border: 0;
+		background: transparent;
+		color: var(--muted);
+		cursor: pointer;
+		padding: 4px;
+	}
+	.bulk-tag {
+		width: 8.5em;
+		min-height: 36px;
 	}
 </style>

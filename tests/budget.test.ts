@@ -60,3 +60,23 @@ describe('havi keretek', () => {
 		expect(monthProgress('2026-08-31', '2026-09')).toBe(0);
 	});
 });
+
+import { budgetCrossings } from '../src/lib/budget';
+
+describe('keretátlépés mentés után', () => {
+	it('csak a most átlépett szintet jelzi, kategóriánként és az összesre is', () => {
+		const before = [tx({ id: 1, type: 'expense', amount: 20000, date: '2026-09-05', categoryId: 1 })]; // 67%
+		const after = [...before, tx({ id: 2, type: 'expense', amount: 5000, date: '2026-09-06', categoryId: 1 })]; // 83%
+		const c = budgetCrossings(before, after, cats, '2026-09', null);
+		expect(c).toEqual([{ name: 'Étel', level: 'warn', ratio: 25000 / 30000 }]);
+		// már 80% fölött volt, és most nem lépett át újabb szintet: nincs jelzés
+		const more = [...after, tx({ id: 3, type: 'expense', amount: 1000, date: '2026-09-07', categoryId: 1 })];
+		expect(budgetCrossings(after, more, cats, '2026-09', null)).toEqual([]);
+		// túllépés
+		const over = [...after, tx({ id: 4, type: 'expense', amount: 6000, date: '2026-09-08', categoryId: 1 })];
+		expect(budgetCrossings(after, over, cats, '2026-09', null)[0]).toMatchObject({ name: 'Étel', level: 'over' });
+		// összes keret
+		const total = budgetCrossings(before, after, cats, '2026-09', 30000);
+		expect(total.map((x) => x.name).sort()).toEqual(['Étel', 'Összes kiadás']);
+	});
+});

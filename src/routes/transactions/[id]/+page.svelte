@@ -2,6 +2,7 @@
 	import { page } from '$app/state';
 	import { ledger } from '$lib/ledger.svelte';
 	import TransactionForm from '$lib/components/TransactionForm.svelte';
+	import { toInputAmount } from '$lib/money';
 	import { href } from '$lib/nav';
 
 	const tx = $derived(ledger.transactions.find((t) => t.id === Number(page.params.id)));
@@ -18,14 +19,15 @@
 				editing={tx}
 				initial={{
 					type: tx.type,
-					amount: String(tx.amount),
+					amount: toInputAmount(tx.amount),
 					date: tx.date,
 					description: tx.description,
 					categoryId: tx.categoryId,
 					accountId: tx.accountId,
 					toAccountId: tx.toAccountId,
 					note: tx.note,
-					tags: tx.tags.map((t) => `#${t}`).join(' ')
+					tags: tx.tags.map((t) => `#${t}`).join(' '),
+					splits: tx.splits?.map((p) => ({ categoryId: p.categoryId, amount: toInputAmount(p.amount) }))
 				}}
 			/>
 		{/key}

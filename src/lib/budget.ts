@@ -114,3 +114,34 @@ export function monthProgress(today: string, month: string): number {
 	if (today > to) return 1;
 	return Number(today.slice(8)) / Number(to.slice(8));
 }
+
+export interface BudgetCrossing {
+	name: string;
+	level: 'warn' | 'over';
+	/** Kihasználtság a módosítás után (1 = 100%). */
+	ratio: number;
+}
+
+/**
+ * Egy módosítás után mely keretek léptek át rosszabb szintre (80% / 100%) – a mentés utáni
+ * figyelmeztetéshez. A kategóriakeretek és az összes havi keret is számít.
+ */
+export function budgetCrossings(
+	before: readonly Transaction[],
+	after: readonly Transaction[],
+	categories: readonly Category[],
+	month: string,
+	totalBudget: number | null
+): BudgetCrossing[] {
+	const lines = (txs: readonly Transaction[]) => [
+		...budgetLines(txs, categories, month),
+		...(totalBudgetLine(txs, month, totalBudget) ? [totalBudgetLine(txs, month, totalBudget)!] : [])
+	];
+	const was = new Map(lines(before).map((l) => [l.categoryId, l.level]));
+	const out: BudgetCrossing[] = [];
+	for (const l of lines(after)) {
+		const crossed = crossedLevel(was.get(l.categoryId) ?? 'ok', l.level);
+		if (crossed) out.push({ name: l.name, level: crossed, ratio: l.ratio });
+	}
+	return out.sort((a, b) => b.ratio - a.ratio);
+}

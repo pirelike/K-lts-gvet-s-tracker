@@ -151,10 +151,10 @@ describe('havi keret és összes keret', () => {
 
 	it('a kategória szerkesztése a keretet is menti (bevételi kategóriánál nem)', async () => {
 		const food = cat('expense', 'Étel');
-		await ledger.updateCategory(food.id, { name: 'Étel', color: '#f97316', icon: '🍽️', monthlyBudget: '35 000' });
+		await ledger.updateCategory(food.id, { name: 'Étel', color: '#f97316', icon: '🍽️', monthlyBudget: 35000 });
 		expect(ledger.catById.get(food.id)!.monthlyBudget).toBe(35000);
 		const inc = cat('income', 'Ösztöndíj');
-		await ledger.updateCategory(inc.id, { name: 'Ösztöndíj', color: '#16a34a', icon: '🎓', monthlyBudget: '5000' });
+		await ledger.updateCategory(inc.id, { name: 'Ösztöndíj', color: '#16a34a', icon: '🎓', monthlyBudget: 5000 });
 		expect(ledger.catById.get(inc.id)!.monthlyBudget).toBeNull();
 	});
 });
@@ -217,7 +217,7 @@ describe('ismétlődő tételek', () => {
 
 describe('sablonok, célok, mentett szűrők', () => {
 	it('sablon: létrehozás, átnevezés, átrendezés, törlés; kategória törlésekor a hivatkozás kiürül', async () => {
-		const extra = await ledger.addCategory('expense', { name: 'Ajándék', type: 'expense', color: '#123456', icon: '🎁' });
+		const extra = await ledger.addCategory('expense', { name: 'Ajándék', color: '#123456', icon: '🎁' });
 		const t = await ledger.addTemplate({ name: 'Ajándék', type: 'expense', amount: null, description: 'Ajándék', categoryId: extra.id, accountId: acc('Készpénz').id, toAccountId: null, note: '', tags: [] });
 		const t2 = await ledger.addTemplate({ name: 'Kávé', type: 'expense', amount: 890, description: 'Kávé', categoryId: cat('expense', 'Étel').id, accountId: null, toAccountId: null, note: '', tags: [] });
 		await ledger.renameTemplate(t2.id, 'Reggeli kávé');

@@ -54,3 +54,17 @@ describe('pénznem', () => {
 		expect(convertMinor(10000, eur, huf, 1 / 395)).toBe(39500);
 	});
 });
+
+import { toInputAmount } from '../src/lib/money';
+describe('beviteli mező összege', () => {
+	it('visszaolvasható a bevitelből', () => {
+		expect(toInputAmount(5000)).toBe('5000');
+		setActiveCurrency('EUR');
+		expect(toInputAmount(1250)).toBe('12,5');
+		expect(toInputAmount(1200)).toBe('12');
+		expect(toInputAmount(5)).toBe('0,05');
+		expect(toInputAmount(-1234)).toBe('-12,34');
+		const r = evaluateExpression(toInputAmount(1234));
+		expect(r.ok && r.value).toBe(1234);
+	});
+});

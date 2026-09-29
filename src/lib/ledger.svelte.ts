@@ -31,14 +31,7 @@ import {
 	type Transaction,
 	type TxInput
 } from './types';
-import type {
-	AccountValues,
-	CategoryFormValues,
-	GoalInput,
-	RecurringInput,
-	TemplateInput
-} from './validation';
-import { parseBudget } from './validation';
+import type { AccountValues, GoalInput, RecurringInput, TemplateInput } from './validation';
 
 export class LedgerError extends Error {}
 
@@ -267,6 +260,15 @@ class Ledger {
 		return { changed: changedRows.length, skipped };
 	}
 
+	/** Meglévő tételek felülírása a megadott állapotra (a csoportos módosítás visszavonása). */
+	async replaceTxs(rows: Transaction[]): Promise<void> {
+		const by = new Map(rows.map((r) => [r.id, r]));
+		const present = rows.filter((r) => this.transactions.some((t) => t.id === r.id) && this.refsOk(r));
+		await this.db.putMany('transactions', present);
+		this.transactions = this.transactions.map((t) => (by.has(t.id) && present.includes(by.get(t.id)!) ? by.get(t.id)! : t));
+		this.notify();
+	}
+
 	/** Több tétel hozzáadása egyszerre (CSV-import). */
 	async addTxs(inputs: TxInput[]): Promise<Transaction[]> {
 		if (inputs.length === 0) return [];
@@ -317,7 +319,6 @@ class Ledger {
 				existing ??
 				(await this.addCategory(c.type, {
 					name: c.name.slice(0, 40),
-					type: c.type,
 					color: PALETTE[(this.categories.length + newCategories) % PALETTE.length],
 					icon: ''
 				}));
@@ -343,15 +344,17 @@ class Ledger {
 
 	// --- kategóriák ---
 
-	async addCategory(type: CategoryType, v: CategoryFormValues): Promise<Category> {
+	async addCategory(
+		type: CategoryType,
+		v: { name: string; color: string; icon: string; monthlyBudget?: number | null }
+	): Promise<Category> {
 		const order = Math.max(0, ...this.categories.filter((c) => c.type === type).map((c) => c.sortOrder));
-		const budget = type === 'expense' ? parseBudget(v.monthlyBudget) : { ok: true as const, value: null };
 		const row = await this.db.add<Category>('categories', {
 			name: v.name,
 			type,
 			color: v.color,
 			icon: v.icon,
-			monthlyBudget: budget.ok ? budget.value : null,
+			monthlyBudget: type === 'expense' ? (v.monthlyBudget ?? null) : null,
 			archived: false,
 			sortOrder: order + 1,
 			createdAt: Date.now()
@@ -361,18 +364,14 @@ class Ledger {
 		return row;
 	}
 
-	async updateCategory(id: number, v: Pick<CategoryFormValues, 'name' | 'color' | 'icon'> & { monthlyBudget?: string | number | null }) {
+	async updateCategory(
+		id: number,
+		v: { name: string; color: string; icon: string; monthlyBudget?: number | null }
+	) {
 		const cur = this.catById.get(id);
 		if (!cur) throw new LedgerError('A kategória nem található');
 		const next: Category = { ...cur, name: v.name, color: v.color, icon: v.icon };
-		if (v.monthlyBudget !== undefined && cur.type === 'expense') {
-			if (typeof v.monthlyBudget === 'number' || v.monthlyBudget === null) next.monthlyBudget = v.monthlyBudget;
-			else {
-				const b = parseBudget(v.monthlyBudget);
-				if (!b.ok) throw new LedgerError(b.error);
-				next.monthlyBudget = b.value;
-			}
-		}
+		if (v.monthlyBudget !== undefined && cur.type === 'expense') next.monthlyBudget = v.monthlyBudget;
 		await this.db.put('categories', next);
 		this.categories = this.categories.map((c) => (c.id === id ? next : c));
 		this.notify();
@@ -436,7 +435,7 @@ class Ledger {
 			if (found.archived) await this.setCategoryArchived(found.id, false);
 			return this.catById.get(found.id)!;
 		}
-		return this.addCategory(type, { ...CORRECTION_CATEGORY, type });
+		return this.addCategory(type, CORRECTION_CATEGORY);
 	}
 
 	// --- számlák ---
@@ -695,6 +694,16 @@ class Ledger {
 		const next = { ...cur, saved: Math.max(0, Math.min(MAX_AMOUNT, cur.saved + delta)) };
 		await this.db.put('goals', next);
 		this.goals = this.goals.map((g) => (g.id === id ? next : g));
+		this.notify();
+	}
+
+	async moveGoal(id: number, dir: -1 | 1) {
+		const group = this.goals.filter((g) => !g.archived).sort(byOrder);
+		const changed = reorder(group, id, dir);
+		if (!changed.length) return;
+		await this.db.putMany('goals', changed);
+		const by = new Map(changed.map((g) => [g.id, g]));
+		this.goals = this.goals.map((g) => by.get(g.id) ?? g);
 		this.notify();
 	}
 

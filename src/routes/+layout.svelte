@@ -3,20 +3,25 @@
 	import { afterNavigate, onNavigate } from '$app/navigation';
 	import { route, viewTransitionKind } from '$lib/route.svelte';
 	import { auth } from '$lib/auth.svelte';
+	import { ledger } from '$lib/ledger.svelte';
 	import AppLogo from '$lib/components/AppLogo.svelte';
 	import Icon from '$lib/components/Icon.svelte';
 	import LockScreen from '$lib/components/LockScreen.svelte';
 	import NavBar from '$lib/components/NavBar.svelte';
 	import SetupScreen from '$lib/components/SetupScreen.svelte';
 	import Toaster from '$lib/components/Toaster.svelte';
-	import { monthOf, todayISO } from '$lib/dates';
-	import { href, markHistory } from '$lib/nav';
+	import ShortcutHelp from '$lib/components/ShortcutHelp.svelte';
+	import { clock } from '$lib/clock.svelte';
+	import { go, href, markHistory } from '$lib/nav';
+	import { runReminderChecks } from '$lib/notify';
+	import { isTypingTarget, resolveShortcut } from '$lib/shortcuts';
 	import { toasts } from '$lib/toast.svelte';
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 
 	let { children } = $props();
 
 	onMount(() => {
+		clock.start();
 		void auth.init();
 		watchForUpdates();
 		// iOS Safari csak akkor alkalmazza a :active állapotot érintésre, ha van touchstart-figyelő.
@@ -62,7 +67,7 @@
 	onNavigate((nav) => {
 		if (!document.startViewTransition || !nav.from || !nav.to || nav.willUnload) return;
 		if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-		const kind = viewTransitionKind(nav.from.url.hash, nav.to.url.hash, monthOf(todayISO()));
+		const kind = viewTransitionKind(nav.from.url.hash, nav.to.url.hash, clock.month);
 		if (!kind) return;
 		const root = document.documentElement;
 		const seq = ++vtSeq;
@@ -79,6 +84,57 @@
 		});
 	});
 
+	// --- billentyűparancsok (lásd $lib/shortcuts) ---
+	let helpOpen = $state(false);
+	let chord: string | null = null;
+	let chordTimer: ReturnType<typeof setTimeout> | undefined;
+
+	async function onKeydown(e: KeyboardEvent) {
+		if (auth.phase !== 'unlocked' || e.defaultPrevented || e.isComposing) return;
+		if (isTypingTarget(e.target) || helpOpen) return;
+		const res = resolveShortcut(e, chord);
+		chord = res.pending;
+		clearTimeout(chordTimer);
+		if (chord) chordTimer = setTimeout(() => (chord = null), 1500);
+		const a = res.action;
+		if (!a) return;
+		e.preventDefault();
+		switch (a.type) {
+			case 'go':
+				await go(a.path);
+				break;
+			case 'help':
+				helpOpen = true;
+				break;
+			case 'lock':
+				auth.lock();
+				break;
+			case 'month':
+				// A hónapváltó gombok (főoldal, tételek, naptár, elemzés) közül az előző / következő.
+				document.querySelector<HTMLElement>(`.pager a[aria-label="${a.delta < 0 ? 'Előző' : 'Következő'} hónap"]`)?.click();
+				break;
+			case 'search':
+				if (route.path !== '/transactions') await go('/transactions');
+				await tick();
+				setTimeout(() => document.getElementById('q')?.focus(), 30);
+				break;
+		}
+	}
+
+	// --- emlékeztető-értesítések: percenként ellenőrizzük, mi esedékes (háttérben lévő oldalon) ---
+	$effect(() => {
+		if (auth.phase !== 'locked' && auth.phase !== 'unlocked') return;
+		if (!auth.reminders.enabled) return;
+		const check = () => void runReminderChecks();
+		check();
+		const id = setInterval(check, 60_000);
+		document.addEventListener('visibilitychange', check);
+		return () => {
+			clearInterval(id);
+			document.removeEventListener('visibilitychange', check);
+		};
+	});
+
 	// A „+" gomb az űrlapokon felesleges.
 	const showFab = $derived(
 		route.path !== '/new' && !route.path.startsWith('/transactions/')
@@ -89,8 +145,21 @@
 	<title>Költségvetés</title>
 </svelte:head>
 
+<svelte:window onkeydown={onKeydown} />
+
 {#if auth.phase === 'boot'}
-	<main class="gate" aria-busy="true"><AppLogo /></main>
+	<main class="gate" aria-busy="true">
+		<div class="gate-card center">
+			<AppLogo />
+			{#if auth.blocked}
+				<h1>Adatbázis-frissítés folyamatban</h1>
+				<p class="muted">
+					Az app egy másik lapja vagy ablaka még a régi verziót használja, és blokkolja a frissítést. Zárd be az app többi
+					lapját (vagy a telepített alkalmazás másik példányát) – ez a képernyő magától folytatódik.
+				</p>
+			{/if}
+		</div>
+	</main>
 {:else if auth.phase === 'unsupported'}
 	<main class="gate">
 		<div class="gate-card center">
@@ -119,8 +188,16 @@
 {:else if auth.phase === 'locked'}
 	<LockScreen />
 {:else}
+	<!-- Pénznemváltáskor az egész felület újraépül, hogy minden összeg az új pénznemben jelenjen meg. -->
+	{#key ledger.prefs.currency}
 	<div class="app">
 		<NavBar />
+		{#if auth.dbClosed}
+			<div class="notice warn db-closed" role="alert">
+				Az app egy másik lapon frissült, ezért ez a lap már nem éri el az adatbázist.
+				<button type="button" class="btn small" onclick={() => location.reload()}>Újratöltés</button>
+			</div>
+		{/if}
 		<main>
 			{@render children()}
 		</main>
@@ -128,6 +205,8 @@
 			<a class="fab" href={href('/new')} aria-label="Új tétel"><Icon name="plus" size={30} /></a>
 		{/if}
 	</div>
+	{/key}
 {/if}
 
+<ShortcutHelp bind:open={helpOpen} />
 <Toaster />

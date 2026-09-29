@@ -2,21 +2,31 @@
 	import AccountForm from '$lib/components/AccountForm.svelte';
 	import ConfirmButton from '$lib/components/ConfirmButton.svelte';
 	import Icon from '$lib/components/Icon.svelte';
+	import ReorderButtons from '$lib/components/ReorderButtons.svelte';
+	import { clock } from '$lib/clock.svelte';
 	import { href, query } from '$lib/nav';
 	import { ledger, LedgerError } from '$lib/ledger.svelte';
-	import { formatMoney } from '$lib/money';
+	import { evaluateExpression, formatMoney, formatNet } from '$lib/money';
 	import { accountBalances, accountUsage } from '$lib/queries';
 	import { toasts } from '$lib/toast.svelte';
-	import type { Account } from '$lib/types';
+	import { ACCOUNT_TYPE_LABEL, type Account } from '$lib/types';
 
 	let editingId = $state<number | null>(null);
+	let reconcileId = $state<number | null>(null);
+	let actualText = $state('');
 	let showArchived = $state(false);
 
 	const balances = $derived(accountBalances(ledger.accounts, ledger.transactions));
-	const usage = $derived(accountUsage(ledger.transactions));
-	const active = $derived(ledger.accounts.filter((a) => !a.archived).sort((a, b) => a.sortOrder - b.sortOrder));
+	const usage = $derived(accountUsage(ledger.transactions, ledger.recurring));
+	const active = $derived(ledger.activeAccounts);
 	const archived = $derived(ledger.accounts.filter((a) => a.archived));
+	const sum = (types: Account['type'][]) =>
+		active.filter((a) => types.includes(a.type)).reduce((s, a) => s + (balances.get(a.id) ?? 0), 0);
 	const total = $derived(active.reduce((s, a) => s + (balances.get(a.id) ?? 0), 0));
+	const spendable = $derived(sum(['cash', 'checking']));
+	const savings = $derived(sum(['savings']));
+	const credit = $derived(sum(['credit']));
+	const hasCredit = $derived(active.some((a) => a.type === 'credit'));
 
 	async function run(fn: () => Promise<unknown>, ok?: string) {
 		try {
@@ -26,16 +36,39 @@
 			toasts.error(e instanceof LedgerError || e instanceof Error ? e.message : 'A művelet nem sikerült');
 		}
 	}
+
+	// --- egyenleg-egyeztetés ---
+	function openReconcile(a: Account) {
+		reconcileId = reconcileId === a.id ? null : a.id;
+		actualText = '';
+		editingId = null;
+	}
+	const actual = $derived(actualText.trim() ? evaluateExpression(actualText) : null);
+	async function reconcile(a: Account) {
+		if (!actual?.ok) return;
+		const cur = balances.get(a.id) ?? 0;
+		if (actual.value === cur) {
+			toasts.show('Az egyenleg már egyezik');
+			reconcileId = null;
+			return;
+		}
+		await run(async () => {
+			const r = await ledger.reconcileAccount(a.id, actual.value, { date: clock.today });
+			if (r) toasts.show(`Korrekciós tétel: ${formatNet(r.difference)}`);
+			reconcileId = null;
+		});
+	}
 </script>
 
 <svelte:head><title>Számlák · Költségvetés</title></svelte:head>
 
-{#snippet card(a: Account)}
+{#snippet card(a: Account, i: number, count: number)}
 	{@const b = balances.get(a.id) ?? 0}
 	<li class="card stack">
 		<div class="row">
 			<div class="grow">
 				<strong>{a.name}</strong>
+				<span class="badge">{ACCOUNT_TYPE_LABEL[a.type]}</span>
 				{#if a.archived}<span class="badge">archivált</span>{/if}
 				<div class="muted small">
 					Kezdőegyenleg: {formatMoney(a.initialBalance)} ·
@@ -45,15 +78,53 @@
 			<strong class="num" style="font-size:1.25rem" class:exp={b < 0} data-testid={`balance-${a.name}`}>{formatMoney(b)}</strong>
 		</div>
 		<div class="row wrap">
-			<button class="btn small" type="button" onclick={() => (editingId = editingId === a.id ? null : a.id)}>
+			{#if !a.archived}
+				<button class="btn small" type="button" onclick={() => openReconcile(a)} aria-expanded={reconcileId === a.id}>Egyenleg egyeztetése</button>
+			{/if}
+			<button class="btn small" type="button" onclick={() => { editingId = editingId === a.id ? null : a.id; reconcileId = null; }}>
 				{editingId === a.id ? 'Bezár' : 'Szerkesztés'}
 			</button>
+			{#if !a.archived && count > 1}
+				<span class="spacer"></span>
+				<ReorderButtons index={i} {count} label={a.name} onmove={(dir) => run(() => ledger.moveAccount(a.id, dir))} />
+			{/if}
 		</div>
+		{#if reconcileId === a.id}
+			<div class="notice stack" data-testid="reconcile-panel">
+				<div class="field">
+					<label for={`real-${a.id}`}>Valós egyenleg most</label>
+					<input id={`real-${a.id}`} type="text" inputmode="decimal" autocomplete="off" placeholder="pl. 41 200" bind:value={actualText}
+						onkeydown={(e) => e.key === 'Enter' && (e.preventDefault(), reconcile(a))} />
+				</div>
+				{#if actual?.ok}
+					{@const diff = actual.value - b}
+					<p class="small">
+						Nyilvántartás: <strong class="num">{formatMoney(b)}</strong> · valós: <strong class="num">{formatMoney(actual.value)}</strong>
+						{#if diff === 0}
+							– <strong>egyezik</strong>.
+						{:else}
+							· különbség: <strong class="num" class:inc={diff > 0} class:exp={diff < 0}>{formatNet(diff)}</strong>
+						{/if}
+					</p>
+					{#if diff !== 0}
+						<p class="hint">
+							Létrejön egy „Egyenleg-egyeztetés" tétel ({diff > 0 ? 'bevétel' : 'kiadás'}, {formatMoney(Math.abs(diff))}), így a kezdőegyenleg és a múlt nem változik.
+						</p>
+					{/if}
+				{:else if actual && !actual.ok}
+					<p class="error" role="alert">{actual.error}</p>
+				{/if}
+				<div class="row wrap">
+					<button class="btn primary small" type="button" disabled={!actual?.ok} onclick={() => reconcile(a)}>Korrekciós tétel létrehozása</button>
+					<button class="btn small" type="button" onclick={() => (reconcileId = null)}>Mégse</button>
+				</div>
+			</div>
+		{/if}
 		{#if editingId === a.id}
 			<div class="stack">
 				<AccountForm
 					editingId={a.id}
-					initial={{ name: a.name, initialBalance: a.initialBalance }}
+					initial={{ name: a.name, initialBalance: a.initialBalance, type: a.type }}
 					submitLabel="Mentés"
 					onsave={async (v) => {
 						await run(() => ledger.updateAccount(a.id, v), 'Számla módosítva');
@@ -85,14 +156,25 @@
 		<a class="btn small" href={href(`/new${query({ type: 'transfer' })}`)}><Icon name="transfer" size={18} /> Átvezetés</a>
 	</div>
 
-	<div class="card row">
-		<span class="grow muted">Összes egyenleg</span>
-		<strong class="num" style="font-size:1.35rem" class:exp={total < 0}>{formatMoney(total)}</strong>
+	<div class="card stack" style="gap:8px">
+		<div class="row">
+			<span class="grow muted">Összes egyenleg</span>
+			<strong class="num" style="font-size:1.35rem" class:exp={total < 0}>{formatMoney(total)}</strong>
+		</div>
+		{#if active.some((a) => a.type !== 'checking')}
+			<div class="row small muted"><span class="grow">Elkölthető (készpénz + folyószámla)</span><span class="num">{formatMoney(spendable)}</span></div>
+			{#if active.some((a) => a.type === 'savings')}
+				<div class="row small muted"><span class="grow">Megtakarítás</span><span class="num">{formatMoney(savings)}</span></div>
+			{/if}
+			{#if hasCredit}
+				<div class="row small muted"><span class="grow">Hitelkártya (negatív = tartozás)</span><span class="num" class:exp={credit < 0}>{formatMoney(credit)}</span></div>
+			{/if}
+		{/if}
 	</div>
 
 	<ul class="stack" style="list-style:none;margin:0;padding:0">
-		{#each active as a (a.id)}
-			{@render card(a)}
+		{#each active as a, i (a.id)}
+			{@render card(a, i, active.length)}
 		{:else}
 			<li class="card empty">Még nincs számlád – hozz létre egyet lent.</li>
 		{/each}
@@ -112,8 +194,8 @@
 			</button>
 			{#if showArchived}
 				<ul class="stack" style="list-style:none;margin:0;padding:0">
-					{#each archived as a (a.id)}
-						{@render card(a)}
+					{#each archived as a, i (a.id)}
+						{@render card(a, i, archived.length)}
 					{/each}
 				</ul>
 			{/if}

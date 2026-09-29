@@ -1,6 +1,8 @@
 <script lang="ts">
 	import CategoryForm from '$lib/components/CategoryForm.svelte';
 	import ConfirmButton from '$lib/components/ConfirmButton.svelte';
+	import ReorderButtons from '$lib/components/ReorderButtons.svelte';
+	import { formatMoney } from '$lib/money';
 	import { href, query } from '$lib/nav';
 	import { segIndicator } from '$lib/segIndicator';
 	import { ledger, LedgerError } from '$lib/ledger.svelte';
@@ -12,7 +14,7 @@
 	let editingId = $state<number | null>(null);
 	let showArchived = $state(false);
 
-	const usage = $derived(categoryUsage(ledger.transactions));
+	const usage = $derived(categoryUsage(ledger.transactions, ledger.recurring));
 	const all = $derived(ledger.allCategories(tab));
 	const active = $derived(all.filter((c) => !c.archived));
 	const archived = $derived(all.filter((c) => c.archived));
@@ -29,7 +31,7 @@
 
 <svelte:head><title>Kategóriák · Költségvetés</title></svelte:head>
 
-{#snippet row(c: Category)}
+{#snippet row(c: Category, i: number, count: number)}
 	<li class="stack" style="padding:12px 16px;gap:10px">
 		<div class="row">
 			<span class="tx-icon" style:--dot={c.color} aria-hidden="true">{c.icon || '•'}</span>
@@ -38,8 +40,12 @@
 				{#if c.archived}<span class="badge">archivált</span>{/if}
 				<div class="muted small">
 					<a href={href(`/transactions${query({ cat: c.id })}`)}>{usage.get(c.id) ?? 0} tétel</a>
+					{#if c.monthlyBudget}· havi keret: {formatMoney(c.monthlyBudget)}{/if}
 				</div>
 			</div>
+			{#if !c.archived && count > 1}
+				<ReorderButtons index={i} {count} label={c.name} onmove={(dir) => run(() => ledger.moveCategory(c.id, dir))} />
+			{/if}
 			<button class="btn small" type="button" onclick={() => (editingId = editingId === c.id ? null : c.id)}>
 				{editingId === c.id ? 'Bezár' : 'Szerkesztés'}
 			</button>
@@ -49,7 +55,7 @@
 				<CategoryForm
 					type={c.type}
 					editingId={c.id}
-					initial={{ name: c.name, icon: c.icon, color: c.color }}
+					initial={{ name: c.name, icon: c.icon, color: c.color, monthlyBudget: c.monthlyBudget }}
 					submitLabel="Mentés"
 					onsave={async (v) => {
 						await run(() => ledger.updateCategory(c.id, v), 'Kategória módosítva');
@@ -98,8 +104,8 @@
 
 	<div class="card flush">
 		<ul class="list">
-			{#each active as c (c.id)}
-				{@render row(c)}
+			{#each active as c, i (c.id)}
+				{@render row(c, i, active.length)}
 			{:else}
 				<li class="empty">Nincs aktív kategória.</li>
 			{/each}
@@ -114,8 +120,8 @@
 			{#if showArchived}
 				<div class="card flush">
 					<ul class="list">
-						{#each archived as c (c.id)}
-							{@render row(c)}
+						{#each archived as c, i (c.id)}
+							{@render row(c, i, archived.length)}
 						{/each}
 					</ul>
 				</div>

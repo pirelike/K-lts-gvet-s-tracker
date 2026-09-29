@@ -24,6 +24,16 @@ export function formatNumber(n: number, decimals: number = activeCurrency().deci
 	return (n < 0 ? '\u2212' : '') + grouped;
 }
 
+/** Összeg beviteli mezőbe: 1250 (EUR) -> „12,5", 5000 (HUF) -> „5000" (nincs ezres tagolás, nincs felesleges nulla). */
+export function toInputAmount(minor: number): string {
+	const dec = activeCurrency().decimals;
+	if (dec === 0) return String(minor);
+	const abs = Math.abs(minor);
+	const scale = 10 ** dec;
+	const frac = String(abs % scale).padStart(dec, '0').replace(/0+$/, '');
+	return `${minor < 0 ? '-' : ''}${Math.floor(abs / scale)}${frac ? ',' + frac : ''}`;
+}
+
 /** Összeg az aktív pénznemben: „12 345 Ft" vagy „12,50 €". */
 export function formatMoney(n: number): string {
 	return `${formatNumber(n)}${NBSP}${activeCurrency().symbol}`;
