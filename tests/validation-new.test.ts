@@ -80,7 +80,7 @@ describe('cél és sablon', () => {
 		expect(ok.ok && ok.value).toMatchObject({ name: 'Laptop', target: 300000, saved: 0, deadline: '2027-01-01' });
 		const bad = validateGoal({ name: '', icon: '', color: 'piros', target: '0', saved: '-5', accountId: null, deadline: 'holnap' }, []);
 		expect(!bad.ok && Object.keys(bad.errors).sort()).toEqual(['color', 'deadline', 'name', 'saved', 'target']);
-		const dup = validateGoal({ name: 'laptop', icon: '', color: '#3b82f6', target: '5', saved: '', accountId: null, deadline: '' }, [{ id: 1, name: 'Laptop', icon: '', color: '#000000', target: 1, saved: 0, accountId: null, deadline: null, archived: false, sortOrder: 1, createdAt: 1 }]);
+		const dup = validateGoal({ name: 'laptop', icon: '', color: '#3b82f6', target: '5', saved: '', accountId: null, deadline: '' }, [{ id: 1, name: 'Laptop', icon: '', color: '#000000', target: 1, saved: 0, accountId: null, deadline: null, archived: false, sortOrder: 1, createdAt: 1, updatedAt: 1 }]);
 		expect(!dup.ok && dup.errors.name).toMatch(/Már van/);
 	});
 	it('sablon neve', () => {

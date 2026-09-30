@@ -29,7 +29,7 @@ import {
 } from '../types';
 import { inferAccountType } from './idb';
 
-export const BACKUP_VERSION = 2;
+export const BACKUP_VERSION = 3;
 
 type Raw = Record<string, unknown>;
 
@@ -62,6 +62,12 @@ const isInt = (v: unknown): v is number => typeof v === 'number' && Number.isInt
 const isStr = (v: unknown): v is string => typeof v === 'string';
 const isDate = (v: unknown): v is string => isStr(v) && isValidISODate(v);
 
+/** `createdAt` és `updatedAt` egy nyers rekordból; az `updatedAt` hiányában a `createdAt`. */
+function stamps(o: Raw): { createdAt: number; updatedAt: number } {
+	const createdAt = isInt(o.createdAt) ? o.createdAt : Date.now();
+	return { createdAt, updatedAt: isInt(o.updatedAt) ? o.updatedAt : createdAt };
+}
+
 /** Lépések: MIGRATIONS[n] az n. verziójú nyers mentést az (n+1). verzióra hozza. */
 const MIGRATIONS: Record<number, (raw: Raw) => Raw> = {
 	// 1 -> 2: számlatípus, ismétlődők, sablonok, célok, mentett szűrők, beállítások (HUF).
@@ -78,7 +84,24 @@ const MIGRATIONS: Record<number, (raw: Raw) => Raw> = {
 		templates: [],
 		goals: [],
 		filters: []
-	})
+	}),
+	// 2 -> 3: minden rekord `updatedAt`-et kap (a szinkronhoz); hiányában a `createdAt`.
+	2: (raw) => {
+		const stamped = (v: unknown) =>
+			Array.isArray(v)
+				? v.map((r) => (isObj(r) && !isInt(r.updatedAt) ? { ...r, updatedAt: isInt(r.createdAt) ? r.createdAt : 0 } : r))
+				: v;
+		return {
+			...raw,
+			version: 3,
+			accounts: stamped(raw.accounts),
+			categories: stamped(raw.categories),
+			recurring: stamped(raw.recurring),
+			templates: stamped(raw.templates),
+			goals: stamped(raw.goals),
+			filters: stamped(raw.filters)
+		};
+	}
 };
 
 /** A mentés vissza is tölthető, ha a `version` legfeljebb az app ismert legújabb verziója. */
@@ -154,7 +177,7 @@ export function parseBackup(text: string): ParsedBackup {
 			initialBalance: a.initialBalance,
 			archived: a.archived === true,
 			sortOrder: isInt(a.sortOrder) ? a.sortOrder : 0,
-			createdAt: isInt(a.createdAt) ? a.createdAt : Date.now()
+			...stamps(a)
 		});
 	}
 
@@ -183,7 +206,7 @@ export function parseBackup(text: string): ParsedBackup {
 			monthlyBudget: isInt(c.monthlyBudget) && c.monthlyBudget > 0 ? c.monthlyBudget : null,
 			archived: c.archived === true,
 			sortOrder: isInt(c.sortOrder) ? c.sortOrder : 0,
-			createdAt: isInt(c.createdAt) ? c.createdAt : Date.now()
+			...stamps(c)
 		});
 	}
 
@@ -304,7 +327,7 @@ export function parseBackup(text: string): ParsedBackup {
 			endDate: isStr(r.endDate) ? r.endDate : null,
 			lastHandled: isStr(r.lastHandled) ? r.lastHandled : null,
 			active: r.active !== false,
-			createdAt: isInt(r.createdAt) ? r.createdAt : Date.now()
+			...stamps(r)
 		});
 	}
 
@@ -338,7 +361,7 @@ export function parseBackup(text: string): ParsedBackup {
 			note: isStr(t.note) ? t.note : '',
 			tags: Array.isArray(t.tags) ? t.tags.filter(isStr) : [],
 			sortOrder: isInt(t.sortOrder) ? t.sortOrder : 0,
-			createdAt: isInt(t.createdAt) ? t.createdAt : Date.now()
+			...stamps(t)
 		});
 	}
 
@@ -369,7 +392,7 @@ export function parseBackup(text: string): ParsedBackup {
 			deadline: isStr(g.deadline) ? g.deadline : null,
 			archived: g.archived === true,
 			sortOrder: isInt(g.sortOrder) ? g.sortOrder : 0,
-			createdAt: isInt(g.createdAt) ? g.createdAt : Date.now()
+			...stamps(g)
 		});
 	}
 
@@ -383,7 +406,7 @@ export function parseBackup(text: string): ParsedBackup {
 			id: f.id,
 			name: f.name,
 			query: f.query,
-			createdAt: isInt(f.createdAt) ? f.createdAt : Date.now()
+			...stamps(f)
 		});
 	}
 

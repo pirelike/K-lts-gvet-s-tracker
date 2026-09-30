@@ -6,7 +6,7 @@ export const DB_NAME = 'koltsegvetes';
  * `MIGRATIONS` tömbbe új lépést írsz (az i. elem az (i+1). verzióra lép). Létező lépést soha ne módosíts:
  * a régi telepítések pontosan azokon mennek végig.
  */
-export const DB_VERSION = 2;
+export const DB_VERSION = 3;
 
 export type DataStore =
 	| 'accounts'
@@ -60,9 +60,26 @@ function toV2(db: IDBDatabase, tx: IDBTransaction) {
 	};
 }
 
+/**
+ * A 3. verzió: a szinkronhoz minden rekordtípus `updatedAt` mezőt kap (a tranzakcióknak már van).
+ * A hiányzó érték a `createdAt`, így a régi adatok időrendje nem változik.
+ */
+function toV3(_db: IDBDatabase, tx: IDBTransaction) {
+	for (const s of ['accounts', 'categories', 'recurring', 'templates', 'goals', 'filters']) {
+		const req = tx.objectStore(s).openCursor();
+		req.onsuccess = () => {
+			const cursor = req.result;
+			if (!cursor) return;
+			const row = cursor.value as { createdAt?: number; updatedAt?: number };
+			if (typeof row.updatedAt !== 'number') cursor.update({ ...row, updatedAt: row.createdAt ?? 0 });
+			cursor.continue();
+		};
+	}
+}
+
 type Migration = (db: IDBDatabase, tx: IDBTransaction) => void;
 /** Az i. elem az (i+1). sémaverzióra lép. */
-const MIGRATIONS: Migration[] = [(db) => toV1(db), toV2];
+const MIGRATIONS: Migration[] = [(db) => toV1(db), toV2, toV3];
 
 /** Lefuttatja a `from` verzió utáni összes lépést (kívülről is hívható a teszteknek). */
 export function upgradeSchema(db: IDBDatabase, tx: IDBTransaction, from: number, to: number = DB_VERSION) {

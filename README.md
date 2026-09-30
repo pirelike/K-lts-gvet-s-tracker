@@ -2,7 +2,7 @@
 
 Személyes, egyfelhasználós költségvetés-követő. Minden bevételt és kiadást **kézzel viszel fel**, és nem csak az összeget látod, hanem azt is, **mire** ment el a pénz (szabad szöveges leírás), visszakereshetően.
 
-**Teljesen offline és szerver nélküli:** nincs backend, nincs fiók, nincs bankintegráció. Az app statikus fájlokból áll, az adataid **kizárólag ezen az eszközön, a böngészőben** (IndexedDB) tárolódnak. Első betöltés után internet nélkül is fut (service worker), telefonra telepíthető (PWA). Az első indításkor **te állítod be a saját PIN-kódodat**, ami helyben, hash-elve tárolódik.
+**Teljesen offline és szerver nélküli:** nincs backend, nincs fiók, nincs bankintegráció. Az app statikus fájlokból áll, az adataid alapból **kizárólag ezen az eszközön, a böngészőben** (IndexedDB) tárolódnak; ha kéred, a **saját Google Drive-odon vagy Dropboxodon, titkosítva** eljutnak a többi eszközödre is (lásd *Szinkronizálás*). Első betöltés után internet nélkül is fut (service worker), telefonra telepíthető (PWA). Az első indításkor **te állítod be a saját PIN-kódodat**, ami helyben, hash-elve tárolódik.
 
 - Magyar felület; alapból HUF (egész számok, ezres tagolás), átváltható más pénznemre (EUR, USD …)
 - Mobil-first, reszponzív, sötét mód a rendszerbeállítás szerint
@@ -45,13 +45,62 @@ Mivel nincs szerveroldali kód, az `build/` mappa **bármilyen statikus tárhely
 
 | Mi | Hogyan |
 | --- | --- |
-| Hol vannak az adatok? | Böngésző IndexedDB, csak az adott eszközön/böngészőprofilban. Nincs szinkron eszközök között. |
+| Hol vannak az adatok? | Böngésző IndexedDB, alapból csak az adott eszközön/böngészőprofilban. Opcionálisan a saját Google Drive / Dropbox tárhelyed egyetlen, **titkosított** fájlján keresztül szinkronban tarthatók több eszköz között (lásd *Szinkronizálás*). Saját szerver nincs. |
 | Biztonsági mentés | Beállítások → *Mentés letöltése (JSON)*, *Mentés küldése…* (telefonon a megosztó lap: Drive, e-mail …) vagy *Jelszóval védett mentés…* (AES-256-GCM, a kulcs a jelszóból PBKDF2-vel készül; elfelejtett jelszóval a fájl nem nyitható meg). Visszatöltés: *Mentés visszatöltése…* (ellenőrzi a fájlt, felülírja a mostani adatokat; a régebbi verziójú mentések is betölthetők). A főoldal figyelmeztet, ha régen volt mentés. |
 | Tartós tárhely | Az app kéri a böngészőtől (`storage.persist()`), hogy tárhelyhiány esetén se törölje az adatokat; a Beállításokban látszik az eredmény. |
 | PIN | Sózott PBKDF2-SHA256 hash (210 000 iteráció), a PIN maga nem tárolódik. 5 hibás próba után növekvő várakozás (30 mp … 15 perc). Automatikus zárolás állítható (azonnal … 30 perc / soha). |
 | Elfelejtett PIN | Nincs visszaállítás az adatok megtartásával, csak *minden adat törlése* után induló újrakezdés (majd JSON-mentés visszatöltése). |
 
+Szinkron bekapcsolva a felhőben lévő fájl **AES-256-GCM** titkosítású (a kulcs a szinkronjelszóból PBKDF2-vel készül, a jelszót senki nem tárolja; elfelejtett jelszóval a felhőfájl nem nyitható meg, de a helyi adatok megmaradnak). A szinkron egyben mentésnek is számít, így a „régen volt mentés" emlékeztető nem jelenik meg, amíg működik.
+
 **Fontos korlát:** a PIN *alkalmazászár* a véletlen belenézés ellen, **nem titkosítás**. Az adatok a böngészőprofilban titkosítatlanul vannak, és mivel minden kliensoldali, egy technikailag jártas támadó a böngészőeszközökkel megkerülheti. Az eszköz zárolása és a böngészőprofil védelme továbbra is szükséges. A böngészőadatok törlése az összes adatot elviszi, ezért érdemes időnként JSON-mentést készíteni.
+
+## Szinkronizálás
+
+A laptopod és a telefonod adatai szinkronban tarthatók a **saját Google Drive-od** vagy **Dropboxod** használatával. **Nincs saját szerver**, és nincs bérelt backend sem: az app továbbra is statikus fájlokból áll, minden a böngészőben fut. Az app **offline-first marad**: szinkron nélkül és internet nélkül is minden úgy működik, mint eddig; a szinkron egy opcionális réteg a helyi adatbázis fölött.
+
+**Hogyan működik**
+
+- A felhőben egyetlen fájl van (`ledger.sync.json`, a Google Drive rejtett *appDataFolder* mappájában, illetve a Dropbox *App folder* mappájában): a teljes állapot és a törlési jelölők, **titkosítva**.
+- Minden eszköz letölti, **rekordonként összefésüli** a sajátjával (az újabb módosítás nyer), és feltölti az eredményt. Az összefésülés kommutatív és idempotens, ezért ha egy feltöltés versenyhelyzet miatt elveszne, a következő szinkron helyreállítja.
+- A szinkron a feloldás után, módosítás után (rövid késleltetéssel), az app előtérbe kerülésekor, újra online állapotkor és a *Szinkron most* gombra fut. Kapcsolat nélkül a módosítások megmaradnak, és később feltöltődnek; az állapotjelző (jobb felül) mutatja, mi a helyzet.
+- Az azonosítók véletlen 53 bites számok, így két eszköz nem adhat ugyanazt az azonosítót két különböző tételnek. Az ismétlődő tételek egy előfordulása minden eszközön ugyanazt az azonosítót kapja, így ha mindkét eszközön jóváhagyod, egy tétel lesz belőle.
+
+**Bekapcsolás:** *Beállítások → Szinkronizálás → Bejelentkezés Google-fiókkal / Dropbox*. Új felhőfájlnál új **szinkronjelszót** kell megadni, meglévőnél azt, amit a másik eszközön beállítottál (eszközönként egyszer). A jelszót az app nem tárolja, csak a belőle képzett, nem kinyerhető kulcsot. A **másik eszköz első indításán** is választható a *Már használod másik eszközön?* csatlakozás.
+
+Ha az új eszközön még nincs saját adat, a felhőben lévő adatok átkerülnek rá. Ha **mindkét oldalon vannak adatok**, választhatsz: a *felhőben lévő adatok használata* (előtte az itteni adatokról mentés töltődik le), az *összefésülés* (mindkét oldal megmarad), vagy *mégse*.
+
+**Beállítás a saját fiókoddal (egyszeri, kb. 10 perc)**
+
+A szinkronhoz egy nyilvános kliens-azonosítóra van szükség (ez **nem titok**). Az azonosítót a build kapja meg, ha nincs beállítva, az adott szolgáltató nem jelenik meg.
+
+*Google*
+1. <https://console.cloud.google.com/> → új projekt (pl. „Költségvetés").
+2. *APIs & Services → Library* → **Google Drive API** engedélyezése.
+3. *OAuth consent screen* (Google Auth Platform): *External*, alkalmazásnév, e-mail. Scope: `drive.appdata`, `openid`, `email`. Amíg az app *Testing* állapotú, **add hozzá a saját Google-fiókodat tesztfelhasználóként**. Saját használatra a *Testing* állapot is elég.
+4. *Credentials → Create credentials → OAuth client ID → Web application*. *Authorized JavaScript origins*: `https://<felhasználó>.github.io` (fejlesztéshez `http://localhost:5173`).
+5. A **Client ID**-t add meg a repóban: *Settings → Secrets and variables → Actions → Variables* → `GOOGLE_CLIENT_ID`. Helyi fejlesztéshez másold a `.env.example`-t `.env.local` néven, és töltsd ki a `VITE_GOOGLE_CLIENT_ID` sort.
+
+*Dropbox*
+1. <https://www.dropbox.com/developers/apps> → *Create app* → *Scoped access* → *App folder* → név.
+2. *Permissions*: `files.content.read`, `files.content.write`, `account_info.read` → *Submit*.
+3. *Settings → OAuth 2 → Redirect URIs*: `https://<felhasználó>.github.io/<repo-neve>/` (és `http://localhost:5173/`). *Allow public clients (Implicit Grant & PKCE)*: engedélyezve.
+4. Az **App key**-t add meg a repóban: *Variables* → `DROPBOX_APP_KEY` (helyben: `VITE_DROPBOX_APP_KEY`). Fejlesztői állapotban az app 50 felhasználóig használható, ez saját célra bőven elég.
+
+A Pages-kiadás a repó *Variables* értékeit adja át a buildnek (`.github/workflows/pages.yml`).
+
+**Korlátok, amiket érdemes tudni**
+
+- **Google:** a böngészőben nincs refresh token, a hozzáférés kb. 1 óráig él. A megújítás a PIN-feloldás gombnyomásakor csendben megtörténik; ha nem sikerül (popup-blokkoló), az állapotjelző *„Szinkron szünetel – koppints a folytatáshoz"* üzenetet mutat, egy koppintás megoldja, adat nem vész el. **Dropbox:** van refresh token, nem kell újra bejelentkezni; a bejelentkezés átirányítással történik, az app újratölt és újra PIN-t kér, a csatlakozás a feloldás után fejeződik be.
+- **Egyszerre módosított cél:** ha egy megtakarítási cél *befizetett* összegét két eszközön egyszerre, offline növeled, az egyik növelés elvész (az újabb módosítás nyer; nincs összegzés).
+- **Törlés és a 180 nap:** a törlési jelölők 180 napig élnek. Egy ennél tovább offline eszköz, amikor újra szinkronizál, **visszahozhat már törölt elemeket**.
+- **Pénznemváltás, mentés visszatöltése, példaadatok betöltése/törlése** az adatok egészét cserélik, ezért új „korszakot" indítanak. Ha másik eszközön ilyen történt, az itteni, még nem szinkronizált módosítások elvesznek. Erről figyelmeztetést kapsz, és az előző állapotról mentés marad (letölthető).
+- **Ha egy törölt kategória/számlát egy másik eszközön közben használnak** (új tétel rá), az elem visszaéled, és erről értesítést kapsz.
+- **Szinkronjelszó cseréjekor** a többi eszköz a következő szinkronnál *„Hibás szinkronjelszó"* üzenetet kap, és az újat kell megadnia.
+- A szinkron **nem visszavonható archívum**: egy hibás módosítás is átmegy a többi eszközre. A JSON-mentés ettől függetlenül érdemes időnként.
+- Csak a JSON-mentésben lévő adatok szinkronizálódnak. Az eszközönkénti beállítások (PIN, automatikus zárolás, emlékeztetők, a szinkron-kapcsolat) nem.
+
+**Kipróbálás valódi fiók nélkül:** fejlesztői buildben vagy az URL-hez fűzött `?syncProvider=memory` paraméterrel megjelenik egy memória-szolgáltató, amivel a teljes folyamat végigpróbálható (`npm run e2e:sync` két böngészőkontextussal).
 
 ## Funkciók
 
@@ -116,7 +165,7 @@ Az előre létrehozott alap kategóriák szerkeszthetők: *Étel, Közlekedés, 
 
 ### Még nem szerepel
 
-Bankintegráció, több eszköz közötti szinkron, tételenkénti többpénznemű követés, valódi (szerver-alapú) push értesítés, hitelkártya-limit és kamatszámítás. Ezek szerver nélkül nem, vagy csak nagy kompromisszummal oldhatók meg.
+Bankintegráció, tételenkénti többpénznemű követés, valódi (szerver-alapú) push értesítés, hitelkártya-limit és kamatszámítás. Ezek szerver nélkül nem, vagy csak nagy kompromisszummal oldhatók meg. (A több eszköz közötti szinkron megvan, de opcionális, és a saját Google Drive / Dropbox tárhelyedet használja.)
 
 ## Felépítés
 
@@ -139,6 +188,9 @@ src/
       idb.ts, repo.ts            IndexedDB burkoló (verziónkénti migráció) és CRUD
       pin.ts, crypto.ts          PIN hash; jelszavas mentés (AES-GCM)
       backup.ts, defaults.ts, demo.ts   JSON-mentés (szigorú ellenőrzés, verzió-migráció), alap adatok, példaadatok
+    sync/                        szinkron: ids, stamp, tombstones, merge (tiszta összefésülés), format (titkosított
+                                 fájl), core (egy futás), engine.svelte (ütemezés, csatlakozás), provider,
+                                 gdrive, dropbox, memory (teszt)
     ledger.svelte.ts             memóriabeli főkönyv (Svelte állapot) + üzleti szabályok
     clock.svelte.ts              reaktív „ma"
     auth.svelte.ts               indítás, PIN-beállítás, zárolás, beállítások
@@ -147,7 +199,8 @@ src/
                                  templates · categories · accounts · import · more · settings
 static/                          manifest, ikonok, favicon
 tests/                           Vitest egység- és integrációs tesztek
-e2e/smoke.mjs, features.mjs      végponttól végpontig böngészős ellenőrzés (Playwright)
+e2e/smoke.mjs, features.mjs,
+  sync.mjs                       végponttól végpontig böngészős ellenőrzés (Playwright; a sync.mjs két eszközzel)
 scripts/make-icons.mjs           PNG ikonok újragenerálása (npm run icons, Playwright kell hozzá)
 ```
 
@@ -156,16 +209,19 @@ scripts/make-icons.mjs           PNG ikonok újragenerálása (npm run icons, Pl
 ### Séma- és mentésverziók (fejlesztőknek)
 
 - **IndexedDB**: a `DB_VERSION` (`src/lib/db/idb.ts`) emelésekor a `MIGRATIONS` tömbbe új lépést kell írni (az i. elem az (i+1). verzióra lép; a régieket soha ne módosítsd). Az upgrade verziónként fut, így a régi telepítések adatvesztés nélkül frissülnek (tesztelve egy valódi 1-es verziójú adatbázison). Ha egy régi lap nyitva marad, az új lap nem hibát mutat, hanem várakozik és jelzi; az új verziójú lapok `onversionchange`-nél maguktól lezárják a kapcsolatukat.
-- **JSON-mentés**: a `BACKUP_VERSION` (`src/lib/db/backup.ts`) emelésekor a `MIGRATIONS[régi]` lépés hozza az előző verzió nyers JSON-ját az eggyel újabb alakra; az ellenőrzés mindig a legújabb alakon fut. Az 1-es verziójú mentések így továbbra is betölthetők (számlatípus a névből, üres ismétlődők/sablonok/célok/szűrők, HUF).
+- **Szinkron és azonosítók**: az új sorok azonosítója `newId()` (véletlen, `>= 2^32`), az alap számláké (1…3) és kategóriáké (101…) fix. A **sorrend ezért nem az azonosítóból, hanem a `createdAt`-ből** jön (`compareTx`, `LedgerRepo.loadAll`). A `createdAt` és az `updatedAt` a `stamp()`-ből (szigorúan növekvő) származik. Új rekordtípus vagy mező felvételekor: `updatedAt` minden módosításnál, a törlés a `LedgerRepo.remove*`-on át (törlési jelölő), és az összefésülés (`sync/merge.ts`) szabályainak bővítése.
+- **JSON-mentés**: a `BACKUP_VERSION` (`src/lib/db/backup.ts`) emelésekor a `MIGRATIONS[régi]` lépés hozza az előző verzió nyers JSON-ját az eggyel újabb alakra; az ellenőrzés mindig a legújabb alakon fut. Az 1-es és 2-es verziójú mentések így továbbra is betölthetők (számlatípus a névből, üres ismétlődők/sablonok/célok/szűrők, HUF, a hiányzó `updatedAt` a `createdAt`).
 
 ## Tesztek
 
 ```bash
-npm test             # 211 egység- és integrációs teszt (Vitest, fake-indexeddb)
+npm test             # 400+ egység-, tulajdonság- és integrációs teszt (Vitest, fake-indexeddb)
 npm run check        # svelte-check / TypeScript
 ```
 
 A tesztek lefedik az összegkifejezéseket és pénznemeket, dátumokat, validációt (felosztás, jóváírás), szűrést/összesítést, számlaegyenlegeket, az IndexedDB-réteget és a **séma-migrációt** (1-es verziójú adatbázis, blokkolt frissítés, lezáródó kapcsolat), a mentés export→import körét, a **régi (v1) mentések betöltését**, a jelszavas mentést, a PIN-t, a kereteket, az ismétlődő tételeket, az előrejelzést, az elemzéseket, a naptárt, a célokat, a gyorsbevitel elemzőjét, a CSV-t (olvasás, írás, import terv, export→import kör), a billentyűparancsokat, az emlékeztetőket, a reaktív „ma"-t és az üzleti szabályokat (pl. használt kategória nem törölhető, egyenleg-egyeztetés, csoportos módosítás, pénznemváltás).
+
+A szinkronhoz külön tesztek tartoznak: az **összefésülés tulajdonság-tesztjei** véletlen műveletsorokon (kommutativitás, idempotencia, asszociativitás rekordszinten, érvényesség, felhő-közvetített konvergencia), a kódolás/titkosítás, két „eszköz" közötti valós forgatókönyvek (versenyhelyzet, szinkron közbeni szerkesztés, korszakváltás, jelszócsere, ütemezés) és a két szolgáltató `fetch`-mockkal.
 
 Böngészős végigpróbálás az éles buildre. A `smoke.mjs` az alapfolyamatokat (PIN, felvitel, keresés, szerkesztés, törlés+visszavonás, átvezetés, kategóriák, mentés, zárolás, **offline újraindítás**), a `features.mjs` az újabb funkciókat próbálja végig (gyorsbevitel, keretek, jóváírás, felosztás, ismétlődők, egyeztetés, sablonok, csoportos műveletek, mentett szűrők, elemzés, naptár, billentyűparancsok, CSV-kör, jelszavas mentés, emlékeztetők, pénznemváltás, hónapforduló):
 
@@ -175,6 +231,7 @@ python3 -m http.server 4173 --directory build &
 npm install --no-save playwright   # egyszer; Chromium is kell
 BASE_URL=http://localhost:4173/ npm run e2e
 BASE_URL=http://localhost:4173/ npm run e2e:features
+BASE_URL=http://localhost:4173/ npm run e2e:sync      # két böngészőkontextus, memória-szolgáltatóval
 ```
 
 ## Ismert megjegyzések

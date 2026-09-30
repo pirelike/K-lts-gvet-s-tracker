@@ -400,3 +400,158 @@ a felhasználó kliens-azonosítói kellenek.
 ## Eltérések
 
 *(Az implementáló session ide írja, ha a tervtől el kellett térni, és miért.)*
+
+Az alábbi pontokban a megvalósítás eltér a tervtől, vagy kiegészíti azt. Mindegyiket a kód megvizsgálása
+után döntöttem el; a tervezett viselkedés (ütközésmentes id-k, LWW, jelölők) ezekkel együtt is teljesül.
+
+### 1–3. fázis
+
+- **Sorrend az id helyett `createdAt` szerint.** A terv nem számolt azzal, hogy az autoIncrement `id` eddig
+  egyben létrehozási sorrend is volt. `compareTx` (legújabb elöl), az ismert leírások „legutóbbi" választása,
+  a „legnagyobb tételek" döntetlenfeloldása és a `LedgerRepo.loadAll` rendezése az `id` helyett
+  `(createdAt, id)` szerint megy. Ezért a memória sorrendje betöltés után ugyanaz, mint korábban.
+- **`sync/stamp.ts`: szigorúan növekvő időbélyeg.** Egy millisecundumon belüli két módosítás korábban
+  ugyanazt a `Date.now()` értéket kapta, amit az `id` döntött el. Most a `createdAt`/`updatedAt` a főkönyvben
+  mindig szigorúan nő (a példaadatoké és a tömeges műveleteké is). A merge LWW-szabályának is ez kell.
+- **`add`/`addMany` a repóban hívja a `newId()`-t** (nem a `ledger.svelte.ts` minden hívási helyén), így nem
+  maradhat ki egy hívási hely. Ütközésnél (ConstraintError) új id-val újrapróbál.
+- **`applyRecurring`**: az id-t (`recurringTxId`, Web Crypto) a tranzakció megnyitása előtt számolja ki,
+  különben az IndexedDB-tranzakció a `await` alatt lezárulna. A tételt `put`-tal írja (idempotens).
+- **A visszavonások is új `updatedAt`-et adnak** (`restoreTx`, `restoreTxs`, `replaceTxs`), nem csak a
+  visszaállítás: különben egy, már szinkronizált módosítás visszavonása elveszne az összefésülésnél.
+- **Törlési jelző ideje** = `max(stamp(), a törölt sor updatedAt + 1)`. Így a törlés az általa törölt
+  változatot óra-eltérés esetén is legyőzi. Nem létező sor törlése nem ír jelölőt.
+- **`replaceAll` alapból új korszakot indít** (és törli a jelölőket), ezért a `switchCurrency` és az
+  `importBackup` nem kellett külön módosítani. A szinkron a saját korszakát és az összefésült jelölőket egy
+  negyedik paraméterben adja át. A példaadatok betöltése/törlése a `startEpoch()`-ot hívja.
+- **`wipeAll` nem indít új korszakot**, mert a teljes törlés a `meta` tárolót is üríti, vagyis a szinkron-
+  kapcsolatot (`meta.sync`) is. Az eszköz lecsatlakozik; a korszak az újracsatlakozáskor jön létre
+  (`ensureEpoch`), a *4.5* szabályai szerint. A felhőbeli fájlt a törlés nem érinti.
+- **Ismert, korábbról meglévő hiba:** az `e2e/features.mjs` „természetes nyelvű gyorsbevitel: kávé 891 tegnap"
+  lépése a `main`-en, a szinkron-változtatások nélkül is elbukik. Nem ehhez a munkához tartozik.
+
+### 4. fázis (`merge.ts`)
+
+- **Az asszociativitás a rekordszintű részre igaz, egy ismert kivétellel.** A `merge(merge(a,b),c) ≡
+  merge(a,merge(b,c))` tulajdonságot a véletlen műveletsoros teszt a hivatkozás-javítás nélküli összefésülésre
+  (`mergeStates(..., { repair: false })`) ellenőrzi. Kivétel: ha egy köztes összefésülés egy ismétlődő szabályt
+  a törlési jelölő miatt eldob, majd a szabályt később újraszerkesztik, az eldobott `lastHandled` elveszhet.
+  Következménye legfeljebb egy újra felkínált előfordulás, amit a determinisztikus tétel-azonosító
+  (`recurringTxId`) miatt nem lehet megduplázni. A hivatkozás-javítás (visszaélesztés) eleve nem asszociatív,
+  mert attól függ, hogy a hivatkozó tétel az összefésülés pillanatában él-e.
+- **Konvergencia felhő-közvetített szinkronnál** (`merge(felhő, helyi)`, majd mindkettő az eredmény): a teszt
+  4000 véletlen magon futott, mindig megállt. Ritkán (1/4000) három elcsendesedési kör kell két helyett, ha egy
+  visszaélesztett kategória jelölőjét egy elmaradt eszköz még tartalmazza. Végtelen körforgás nem alakul ki.
+- **`report` kibővítve**: `transactions` (a tételek külön számlálója az értesítésekhez) és `epochWinner`
+  (eltérő korszaknál melyik oldal nyert). Az `epochLost` az `opts.syncedAt` (az utolsó sikeres szinkron ideje)
+  óta módosított helyi rekordok, jelölők és a beállítás száma.
+- **`remapIds` kiegészítés:** opcionális `match` (a másik oldal adatai). Egy átszámozandó régi számla vagy
+  kategória, ha típus és név szerint egyezik egy ottanival, annak az azonosítóját kapja (elsőként az azonos
+  id + név). Így a két oldal alapelemeiből (pl. „Étel") nem lesz duplikátum. Egy távoli azonosítóra legfeljebb
+  egy helyi elem képződik.
+- **`hasOwnData`** (a *4.5* 2. pontjához): a saját tétel, a szerkesztett vagy létrehozott elem, az ismétlődő,
+  sablon, cél, mentett szűrő és a beállított keret is „saját adat". Az érintetlen alapelemek (`updatedAt` = 0)
+  és a példaadatok nem. Óvatos: gyanús esetben a felhasználó dönt.
+- **`validateState`** a `makeBackup` + `parseBackup` láncot futtatja, és csak `ok`/hibaüzenetet ad vissza.
+
+### 5. fázis (`format.ts`, kulcsos titkosítás)
+
+- **`setMetaRaw` a repóban.** A `setMeta` JSON-kerülőt használ, ami a `CryptoKey`-t `{}`-vá tenné. A
+  szinkronkulcsot (`meta.syncKey`) ezért a nyers, structured clone-os `setMetaRaw` írja; a `getMeta` változatlan.
+- **`peekSyncFile`**: a fejléc vizsgálata visszafejtés nélkül. Csatlakozáskor kell, mert a kulcshoz a fájl
+  sója és iterációszáma szükséges, még mielőtt a jelszóból kulcs lenne.
+- **A beérkező állapot ellenőrzése a formátumrétegben történik** (`parseSyncPayload`): a `parseBackup`
+  ellenőrzi és normalizálja az adatokat, a törlési jelölők közül az ismeretlen tárolóra vagy hibás időre
+  vonatkozókat eldobja. Így a motor (6. fázis) már csak érvényes `SyncState`-et kap.
+- **A hibakódok** (`invalid`, `unsupported`, `needsPassword`, `wrongPassword`, `badState`) a felületnek szólnak.
+  Jelszócsere után a régi kulcs sója eltér a fájlétól, ezért azonnal „Hibás szinkronjelszó" a válasz, a
+  visszafejtési kísérlet nélkül.
+- Az iterációszám felső korlátja (5 000 000) a `crypto.ts`-ben közös konstans lett (`MAX_KDF_ITERATIONS`).
+
+### 6. fázis (`provider.ts`, `memory.ts`, `core.ts`, `engine.svelte.ts`)
+
+- **Két réteg: `core.ts` és `engine.svelte.ts`.** Egyetlen szinkronfutás (`syncOnce`: letöltés → összefésülés →
+  validálás → helyi csere → feltöltés) a Svelte- és időzítés-mentes `core.ts`-ben van, így két `LedgerRepo`
+  között is tesztelhető. A motor (`SyncEngine`) az ütemezést, a zárat, az állapotot és a csatlakozást adja.
+  A motor nem importálja az `auth`-ot és a `ledger`-t (import-ciklus lenne): az `auth.init` köti be a
+  `SyncHost` felületen át (`repo`, `reload`, `unlocked`, `onSynced`, `onEvent`), és a `ledger.onChange` horoggal.
+- **A helyi csere védett** (`LedgerRepo.replaceAllGuarded`): ugyanabban az IndexedDB-tranzakcióban ellenőrzi, hogy
+  a helyi adat még az, amiből az összefésülés készült. A terv ezt nem mondta ki, de enélkül a szinkron
+  hálózati ideje alatt (másodpercek) végzett szerkesztés elveszne. Eltérés esetén a futás újrakezdődik
+  (legfeljebb háromszor, a felhő-`conflict`-tal közös számlálóval).
+- **`SyncProvider.removeFile()`** új metódus a „Felhőben tárolt adatok törlése" gombhoz (a terv felületén nem
+  szerepelt). A tokenek tárolására `ProviderStorage` került, amit a motor a `meta.sync.tokens` mezőre képez le.
+- **Az `epoch`-vesztés mentése tartós:** eltérő korszaknál a helyi oldal felülírása előtt a helyi adatok JSON-
+  mentése a `meta.lostBackup` alá kerül (és a `sync.lostBackup` állapotba), amíg a felhasználó le nem tölti
+  vagy el nem veti. A terv „felajánljuk, hogy előtte letölti" szövegét így oldottam meg: háttérszinkron
+  közben nem ugorhat fel modális ablak, és az automatikus letöltést a böngésző blokkolhatja.
+- **Első csatlakozás** (`applyFirstConnect`): az átvétel/összefésülés a helyi adatra történik (védetten), a
+  feltöltést a rákövetkező `syncOnce` végzi el. A `completeConnect` rossz jelszónál semmit nem ment el.
+- **`writeKey` a `syncOnce`-ban:** jelszócserénél a letöltött fájlt még a régi kulccsal nyitjuk, és az újjal írjuk.
+- **A szinkron órája `stamp()`** (nem `Date.now()`): az utolsó szinkron ideje így pontosan elválasztja a
+  korábbi és a későbbi módosításokat (az `epochLost` számolásához).
+- **Időzítők injektálhatók** (`Timers`), hogy az ütemezés (debounce, visszalépés) kézzel léptethető órával
+  tesztelhető legyen; a fake-indexeddb saját időzítőit így nem zavarja semmi.
+- **Memória-szolgáltató:** a terv `localStorage`-t ír. Az két elszigetelt böngészőkontextus (két „eszköz") között
+  nem közös, ezért a `MemoryBackend` cserélhető: alapból `localStorage`, de az e2e-teszt a
+  `window.__syncMemoryBackend` horgonyon át Node-oldali, közös tárat köt be.
+- **Az e2e (`e2e/sync.mjs`) a 7. fázisban készül**, mert a csatlakozás végigkattintásához a felület kell.
+
+### 7. fázis (felület, `e2e/sync.mjs`)
+
+- **Az állapotjelző (`SyncBadge`) a `NavBar` mellett, rögzített helyen** van (telefonon jobb felül, oldalsávos
+  elrendezésnél a márkanév mellett), nem az alsó sáv egyik elemeként: az alsó sávban öt hely van, és a szinkron
+  csak akkor jelenik meg, ha be van kapcsolva. Ikonok: felhő (szinkronban / feltöltésre vár / nincs kapcsolat),
+  forgó nyilak, felkiáltójel, szünet. Kapcsolat nélkül nem hibajelzés, hanem „nincs kapcsolat" (az app offline-first).
+  Szüneteléskor koppintásra újra-hitelesít, egyébként a Beállításokhoz visz.
+- **Első indítás (`SetupScreen`):** a „Már használod másik eszközön?" gombok a PIN-ellenőrzés után előbb a
+  bejelentkezést indítják (a felugró ablak csak a gombnyomás gesztusából nyílhat), majd beállítják a PIN-t, és
+  a Beállítások szinkron-szekciójába visznek, ahol a szinkronjelszó megadásával fejeződik be a csatlakozás.
+  A motor `probe` állapota tartja meg a félbehagyott csatlakozást.
+- **Toastok (`sync/notify.ts`):** a `report` alapján, csak érdemi változásnál („3 új tétel érkezett a másik
+  eszközről"), hivatkozás-javításnál és korszak-veszteségnél; az utóbbin „Mentés letöltése" gomb.
+- **Az e2e hash-navigációja:** a `location.hash = …` a SvelteKit hash-routerében (lekérdezőszöveggel az URL-ben)
+  teljes újratöltést okoz, és az app zárolna. Az e2e ezért linkkattintást szimulál, ahogy a felhasználó navigál.
+- **A `start()` már utólag is bekötheti a figyelőket** (láthatóság, `online`): a kapcsolat a feloldás után jön
+  létre, így a figyelőket nem lehetett a `start()`-ban egyszer, feltétel nélkül bekötni. Az e2e találta meg.
+- A `?syncProvider=memory` az URL lekérdezőszövegében marad meg, a hash-router nem bántja.
+
+### 8–9. fázis (`gdrive.ts`, `dropbox.ts`)
+
+- **Valós kipróbálás nem történt.** A két szolgáltató a hamis `fetch`-csel és hamis GIS-szel írt mock-tesztekkel
+  (URL-ek, fejlécek, 401/403/404/409/429/5xx, conflict → újrapróbálás) van lefedve. A Google kliens-azonosító és a
+  Dropbox app key nélkül a tényleges bejelentkezés nem próbálható ki; az útmutató a *12.* pontban van.
+- **Több felhőfájl (Drive):** a `RemoteFile` új, opcionális `extra` mezője a további példányokat adja, a
+  `SyncProvider.discardCopy(ref)` törli őket. A `syncOnce` az azonos kulccsal olvasható példányokat a legrégebbi
+  fájlba fésüli, feltölt, és csak utána törli a többletet. Amit nem tud beolvasni (pl. más jelszó), azt nem
+  törli. A terv szerint ez a szolgáltatón belül dőlt volna el, de az összefésüléshez a kulcs és a `mergeStates`
+  kell, ezért a mag végzi. A keresés a `createdTime` mezőt is kéri, ebből következik a „legrégebbi".
+- **`ensureToken` kivételt dobhat** (`SyncNetworkError`): a Dropbox tokenfrissítése és a GIS-szkript betöltése
+  hálózat nélkül nem „szünetel", hanem „nincs kapcsolat". A motor ezt hálózati hibaként kezeli (visszalépés).
+- **Google-bejelentkezés:** az első `requestAccessToken` `prompt` nélkül fut (a GIS dönt a fiókválasztóról), a
+  megújítás `prompt: ''`-vel. A hozzáférési token (lejárattal és e-mail címmel) a `meta.sync.tokens` alatt él,
+  hogy egy órán belüli újraindításnál ne kelljen új ablak. Csendes megújítást időtúllépés zár le (15 mp).
+- **Dropbox átirányítás:** `consumeDropboxRedirect` az indulásnál (`sync.attach`) cseréli a kódot tokenre és
+  tisztítja az URL-t, a token a feloldásig `sessionStorage`-ban vár; a `SyncProvider.resume()` és a
+  `SyncEngine.resumeConnect()` (az `+layout.svelte` hívja feloldás után) zárja le a csatlakozást a jelszó-lépésnél.
+  Ha a Dropboxot az első indításról indítják, a PIN-t az átirányítás után újra be kell állítani, mert az app
+  újratölt; a token ezt kivárja. A hibák (megtagadott hozzáférés, nem egyező `state`) is a felhasználóhoz jutnak.
+- Az `available()` mindkét szolgáltatónál a build `VITE_*` változójától függ; nélküle a szolgáltató nem jelenik
+  meg, és a felület a beállítási útmutatót mutatja.
+
+### 10. fázis (README, `pages.yml`)
+
+- A README új „Szinkronizálás" fejezete a működést, a bekapcsolást, a Google/Dropbox beállítás lépéseit, a
+  korlátokat (Google-token lejárat, `Goal.saved` LWW, 180 napos jelölők, korszakváltás, jelszócsere) és a
+  memória-szolgáltatós kipróbálást tartalmazza. Az adat-táblázat „Nincs szinkron eszközök között" sora és a „Még
+  nem szerepel" lista frissült; a séma- és mentésverzió-szakasz az új azonosító- és rendezési szabályt is leírja.
+- A `pages.yml` build lépése a repó `GOOGLE_CLIENT_ID` és `DROPBOX_APP_KEY` *Variables* értékét adja át
+  `VITE_GOOGLE_CLIENT_ID` és `VITE_DROPBOX_APP_KEY` néven. A repóban új a `.env.example` helyi fejlesztéshez.
+
+### Állapot
+
+| Fázis | Állapot |
+| --- | --- |
+| 1–7 | kész, valódi fiók nélkül tesztelve (egységtesztek, tulajdonság-tesztek, motor-tesztek, `e2e/sync.mjs`) |
+| 8–9 | kész, mock-tesztekkel; **a valós próbához a felhasználó Google kliens-azonosítója és Dropbox app key-e kell** |
+| 10 | kész |

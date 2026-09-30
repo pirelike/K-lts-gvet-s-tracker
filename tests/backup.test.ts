@@ -39,6 +39,42 @@ describe('mentés: régi verziók betöltése', () => {
 		expect(b.filters).toEqual([]);
 	});
 
+	it('az 1-es verziójú mentés rekordjai updatedAt-et kapnak (= createdAt)', () => {
+		const r = parseBackup(V1);
+		expect(r.ok).toBe(true);
+		if (!r.ok) return;
+		expect(r.backup.accounts.map((a) => [a.createdAt, a.updatedAt])).toEqual([[1, 1], [2, 2]]);
+		expect(r.backup.categories.map((c) => c.updatedAt)).toEqual([1, 2]);
+		expect(r.backup.transactions.map((t) => t.updatedAt)).toEqual([1, 2]); // a tranzakcióké már megvolt
+	});
+
+	it('a 2-es verziójú mentés minden rekordtípusa updatedAt-et kap; a meglévő érték megmarad', () => {
+		const v2 = {
+			app: 'koltsegvetes-tracker',
+			version: 2,
+			exportedAt: '2026-09-01T10:00:00.000Z',
+			prefs: { currency: 'HUF', totalBudget: null },
+			accounts: [{ id: 1, name: 'Készpénz', type: 'cash', initialBalance: 0, archived: false, sortOrder: 1, createdAt: 5 }],
+			categories: [{ id: 1, name: 'Étel', type: 'expense', color: '#f97316', icon: '', monthlyBudget: null, archived: false, sortOrder: 1, createdAt: 6, updatedAt: 60 }],
+			transactions: [],
+			recurring: [{ id: 1, type: 'expense', amount: 1, description: 'x', categoryId: 1, accountId: 1, toAccountId: null, note: '', tags: [], frequency: 'weekly', interval: 1, startDate: '2026-09-07', endDate: null, lastHandled: null, active: true, createdAt: 7 }],
+			templates: [{ id: 1, name: 'Kávé', type: 'expense', amount: null, description: '', categoryId: 1, accountId: 1, toAccountId: null, note: '', tags: [], sortOrder: 1, createdAt: 8 }],
+			goals: [{ id: 1, name: 'Laptop', icon: '', color: '#000000', target: 5, saved: 0, accountId: null, deadline: null, archived: false, sortOrder: 1, createdAt: 9 }],
+			filters: [{ id: 1, name: 'f', query: 'q=a', createdAt: 10 }]
+		};
+		const r = parseBackup(JSON.stringify(v2));
+		expect(r.ok).toBe(true);
+		if (!r.ok) return;
+		const b = r.backup;
+		expect(b.version).toBe(3);
+		expect(b.accounts[0].updatedAt).toBe(5);
+		expect(b.categories[0].updatedAt).toBe(60);
+		expect(b.recurring[0].updatedAt).toBe(7);
+		expect(b.templates[0].updatedAt).toBe(8);
+		expect(b.goals[0].updatedAt).toBe(9);
+		expect(b.filters[0].updatedAt).toBe(10);
+	});
+
 	it('ismeretlen (újabb) verziót nem próbál betölteni', () => {
 		const future = JSON.stringify({ ...JSON.parse(V1), version: BACKUP_VERSION + 1 });
 		const r = parseBackup(future);
@@ -60,10 +96,10 @@ describe('mentés: 2-es verzió', () => {
 			accounts,
 			categories,
 			transactions: txs,
-			recurring: [{ id: 7, type: 'expense', amount: 1500, description: 'Spotify', categoryId: 1, accountId: 1, toAccountId: null, note: '', tags: [], frequency: 'monthly', interval: 1, startDate: '2026-08-15', endDate: null, lastHandled: '2026-09-15', active: true, createdAt: 1 }],
-			templates: [{ id: 1, name: 'Kávé', type: 'expense', amount: 890, description: 'Kávé', categoryId: 1, accountId: 1, toAccountId: null, note: '', tags: [], sortOrder: 1, createdAt: 1 }],
-			goals: [{ id: 1, name: 'Laptop', icon: '💻', color: '#3b82f6', target: 300000, saved: 20000, accountId: 2, deadline: '2027-01-01', archived: false, sortOrder: 1, createdAt: 1 }],
-			filters: [{ id: 1, name: 'Kávék', query: 'q=kave', createdAt: 1 }]
+			recurring: [{ id: 7, type: 'expense', amount: 1500, description: 'Spotify', categoryId: 1, accountId: 1, toAccountId: null, note: '', tags: [], frequency: 'monthly', interval: 1, startDate: '2026-08-15', endDate: null, lastHandled: '2026-09-15', active: true, createdAt: 1, updatedAt: 1 }],
+			templates: [{ id: 1, name: 'Kávé', type: 'expense', amount: 890, description: 'Kávé', categoryId: 1, accountId: 1, toAccountId: null, note: '', tags: [], sortOrder: 1, createdAt: 1, updatedAt: 1 }],
+			goals: [{ id: 1, name: 'Laptop', icon: '💻', color: '#3b82f6', target: 300000, saved: 20000, accountId: 2, deadline: '2027-01-01', archived: false, sortOrder: 1, createdAt: 1, updatedAt: 1 }],
+			filters: [{ id: 1, name: 'Kávék', query: 'q=kave', createdAt: 1, updatedAt: 1 }]
 		});
 	};
 

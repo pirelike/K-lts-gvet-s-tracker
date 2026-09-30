@@ -26,6 +26,8 @@ export interface Account {
 	archived: boolean;
 	sortOrder: number;
 	createdAt: number;
+	/** Az utolsó módosítás ideje (ms); a szinkron ebből dönti el, melyik változat az újabb. */
+	updatedAt: number;
 }
 
 export interface Category {
@@ -41,6 +43,8 @@ export interface Category {
 	archived: boolean;
 	sortOrder: number;
 	createdAt: number;
+	/** Az utolsó módosítás ideje (ms); a szinkron ebből dönti el, melyik változat az újabb. */
+	updatedAt: number;
 }
 
 /** Egy tétel egy kategóriára eső része (felosztott tételnél). */
@@ -115,6 +119,8 @@ export interface Recurring {
 	lastHandled: string | null;
 	active: boolean;
 	createdAt: number;
+	/** Az utolsó módosítás ideje (ms); a szinkron ebből dönti el, melyik változat az újabb. */
+	updatedAt: number;
 }
 
 export type NewRecurring = Omit<Recurring, 'id'>;
@@ -134,6 +140,8 @@ export interface Template {
 	tags: string[];
 	sortOrder: number;
 	createdAt: number;
+	/** Az utolsó módosítás ideje (ms); a szinkron ebből dönti el, melyik változat az újabb. */
+	updatedAt: number;
 }
 
 /** Megtakarítási cél: számlához kötött (a számla egyenlege a haladás) vagy kézi befizetésekkel. */
@@ -151,6 +159,8 @@ export interface Goal {
 	archived: boolean;
 	sortOrder: number;
 	createdAt: number;
+	/** Az utolsó módosítás ideje (ms); a szinkron ebből dönti el, melyik változat az újabb. */
+	updatedAt: number;
 }
 
 /** Mentett szűrő a tétellistához: a lista URL-lekérdezése. */
@@ -160,6 +170,8 @@ export interface SavedFilter {
 	/** pl. `q=kave&cat=3` (a hónap nélkül). */
 	query: string;
 	createdAt: number;
+	/** Az utolsó módosítás ideje (ms); a szinkron ebből dönti el, melyik változat az újabb. */
+	updatedAt: number;
 }
 
 /** Az adatokhoz tartozó beállítások (a mentésben is benne vannak). */
@@ -173,7 +185,7 @@ export const DEFAULT_PREFS: Prefs = { currency: 'HUF', totalBudget: null };
 
 export interface Backup {
 	app: 'koltsegvetes-tracker';
-	version: 2;
+	version: 3;
 	exportedAt: string;
 	prefs: Prefs;
 	accounts: Account[];

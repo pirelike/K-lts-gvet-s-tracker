@@ -1,16 +1,16 @@
 import type { Account, Category, Transaction } from '../src/lib/types';
 
 export const accounts: Account[] = [
-	{ id: 1, name: 'Készpénz', type: 'cash', initialBalance: 10000, archived: false, sortOrder: 1, createdAt: 1 },
-	{ id: 2, name: 'Bankkártya', type: 'checking', initialBalance: 50000, archived: false, sortOrder: 2, createdAt: 2 },
-	{ id: 3, name: 'Régi számla', type: 'checking', initialBalance: 0, archived: true, sortOrder: 3, createdAt: 3 }
+	{ id: 1, name: 'Készpénz', type: 'cash', initialBalance: 10000, archived: false, sortOrder: 1, createdAt: 1, updatedAt: 1 },
+	{ id: 2, name: 'Bankkártya', type: 'checking', initialBalance: 50000, archived: false, sortOrder: 2, createdAt: 2, updatedAt: 2 },
+	{ id: 3, name: 'Régi számla', type: 'checking', initialBalance: 0, archived: true, sortOrder: 3, createdAt: 3, updatedAt: 3 }
 ];
 
 export const categories: Category[] = [
-	{ id: 1, name: 'Étel', type: 'expense', color: '#f97316', icon: '🍽️', monthlyBudget: null, archived: false, sortOrder: 1, createdAt: 1 },
-	{ id: 2, name: 'Közlekedés', type: 'expense', color: '#3b82f6', icon: '🚌', monthlyBudget: null, archived: false, sortOrder: 2, createdAt: 2 },
-	{ id: 3, name: 'Régi', type: 'expense', color: '#000000', icon: '', monthlyBudget: null, archived: true, sortOrder: 3, createdAt: 3 },
-	{ id: 4, name: 'Ösztöndíj', type: 'income', color: '#16a34a', icon: '🎓', monthlyBudget: null, archived: false, sortOrder: 1, createdAt: 4 }
+	{ id: 1, name: 'Étel', type: 'expense', color: '#f97316', icon: '🍽️', monthlyBudget: null, archived: false, sortOrder: 1, createdAt: 1, updatedAt: 1 },
+	{ id: 2, name: 'Közlekedés', type: 'expense', color: '#3b82f6', icon: '🚌', monthlyBudget: null, archived: false, sortOrder: 2, createdAt: 2, updatedAt: 2 },
+	{ id: 3, name: 'Régi', type: 'expense', color: '#000000', icon: '', monthlyBudget: null, archived: true, sortOrder: 3, createdAt: 3, updatedAt: 3 },
+	{ id: 4, name: 'Ösztöndíj', type: 'income', color: '#16a34a', icon: '🎓', monthlyBudget: null, archived: false, sortOrder: 1, createdAt: 4, updatedAt: 4 }
 ];
 
 let nextId = 1;

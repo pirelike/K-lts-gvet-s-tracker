@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { AUTO_LOCK_OPTIONS, auth, DEFAULT_REMINDERS, type ReminderSettings } from '$lib/auth.svelte';
 	import ConfirmButton from '$lib/components/ConfirmButton.svelte';
+	import SyncPanel from '$lib/components/SyncPanel.svelte';
 	import { CURRENCIES, activeCurrency, convertMinor, findCurrency, scaleOf } from '$lib/currency';
 	import { transactionsToCsv } from '$lib/csvExport';
 	import { isEncryptedBackup, parseBackup } from '$lib/db/backup';
@@ -286,8 +287,8 @@
 	<section class="card stack" aria-labelledby="sec-data">
 		<h2 id="sec-data">Adatok és biztonsági mentés</h2>
 		<p class="muted">
-			Az adataid csak ezen az eszközön, ebben a böngészőben vannak. Ha törlöd a böngészőadatokat vagy
-			új telefonra váltasz, a JSON-mentés az egyetlen módja a visszaállításnak.
+			Az adataid alapból csak ezen az eszközön, ebben a böngészőben vannak. Ha törlöd a böngészőadatokat vagy
+			új telefonra váltasz, a JSON-mentés (vagy a bekapcsolt szinkron) az egyetlen módja a visszaállításnak.
 		</p>
 		<p class="small">
 			Utolsó mentés:
@@ -355,6 +356,8 @@
 			</div>
 		{/if}
 	</section>
+
+	<SyncPanel />
 
 	<section class="card stack" aria-labelledby="sec-csv">
 		<h2 id="sec-csv">CSV-export és -import (Excel)</h2>

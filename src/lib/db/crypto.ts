@@ -7,6 +7,9 @@ import { fromB64, toB64 } from './pin';
 
 export const MIN_BACKUP_PASSWORD = 8;
 const ITERATIONS = 310_000;
+/** A kulcsleszármaztatás fájlból olvasott iterációszámának felső korlátja (sérült/rosszindulatú fájl ellen). */
+export const MAX_KDF_ITERATIONS = 5_000_000;
+export const DEFAULT_KDF_ITERATIONS = ITERATIONS;
 
 export interface EncryptedBackup {
 	app: 'koltsegvetes-tracker';
@@ -23,7 +26,11 @@ export function passwordError(password: string): string | null {
 	return null;
 }
 
-async function deriveKey(password: string, salt: Uint8Array, iterations: number): Promise<CryptoKey> {
+/**
+ * Jelszóból és sóból AES-256-GCM kulcs (PBKDF2-SHA256). A kulcs nem kinyerhető (`extractable: false`),
+ * de az IndexedDB tartósan tárolni tudja: a szinkron ezt használja, hogy a jelszót ne kelljen tárolni.
+ */
+export async function deriveBackupKey(password: string, salt: Uint8Array, iterations: number): Promise<CryptoKey> {
 	const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, [
 		'deriveKey'
 	]);
@@ -36,11 +43,28 @@ async function deriveKey(password: string, salt: Uint8Array, iterations: number)
 	);
 }
 
+/** Szöveg titkosítása kész kulccsal. Minden híváshoz új IV készül; az eredmény base64. */
+export async function encryptWithKey(key: CryptoKey, text: string): Promise<{ iv: string; data: string }> {
+	const iv = crypto.getRandomValues(new Uint8Array(12));
+	const cipher = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv as BufferSource }, key, new TextEncoder().encode(text));
+	return { iv: toB64(iv), data: toB64(cipher) };
+}
+
+/** Visszafejtés kész kulccsal; rossz kulcs vagy módosított adat esetén kivételt dob (a GCM hitelesít). */
+export async function decryptWithKey(key: CryptoKey, iv: string, data: string): Promise<string> {
+	const plain = await crypto.subtle.decrypt(
+		{ name: 'AES-GCM', iv: fromB64(iv) as BufferSource },
+		key,
+		fromB64(data) as BufferSource
+	);
+	return new TextDecoder().decode(plain);
+}
+
 /** A mentés JSON-szövegének titkosítása; az eredmény egy újabb JSON-szöveg (a fájl tartalma). */
 export async function encryptBackup(json: string, password: string): Promise<string> {
 	const salt = crypto.getRandomValues(new Uint8Array(16));
 	const iv = crypto.getRandomValues(new Uint8Array(12));
-	const key = await deriveKey(password, salt, ITERATIONS);
+	const key = await deriveBackupKey(password, salt, ITERATIONS);
 	const cipher = await crypto.subtle.encrypt(
 		{ name: 'AES-GCM', iv: iv as BufferSource },
 		key,
@@ -77,7 +101,7 @@ export async function decryptBackup(text: string, password: string): Promise<Dec
 		e.kdf.hash !== 'SHA-256' ||
 		typeof e.kdf.iterations !== 'number' ||
 		e.kdf.iterations < 1 ||
-		e.kdf.iterations > 5_000_000 ||
+		e.kdf.iterations > MAX_KDF_ITERATIONS ||
 		typeof e.kdf.salt !== 'string' ||
 		e.cipher?.name !== 'AES-GCM' ||
 		typeof e.cipher.iv !== 'string' ||
@@ -86,7 +110,7 @@ export async function decryptBackup(text: string, password: string): Promise<Dec
 		return { ok: false, error: 'A titkosított mentés hibás vagy ismeretlen formátumú' };
 	}
 	try {
-		const key = await deriveKey(password, fromB64(e.kdf.salt), e.kdf.iterations);
+		const key = await deriveBackupKey(password, fromB64(e.kdf.salt), e.kdf.iterations);
 		const plain = await crypto.subtle.decrypt(
 			{ name: 'AES-GCM', iv: fromB64(e.cipher.iv) as BufferSource },
 			key,

@@ -97,7 +97,7 @@ describe('kumulált költés és naptár', () => {
 	});
 
 	it('naptár: az esedékes ismétlődő tétel jelölve van', () => {
-		const rec: Recurring = { id: 1, type: 'expense', amount: 1, description: 'x', categoryId: 1, accountId: 1, toAccountId: null, note: '', tags: [], frequency: 'weekly', interval: 1, startDate: '2026-09-07', endDate: null, lastHandled: null, active: true, createdAt: 1 };
+		const rec: Recurring = { id: 1, type: 'expense', amount: 1, description: 'x', categoryId: 1, accountId: 1, toAccountId: null, note: '', tags: [], frequency: 'weekly', interval: 1, startDate: '2026-09-07', endDate: null, lastHandled: null, active: true, createdAt: 1, updatedAt: 1 };
 		const cells = calendarWeeks([], '2026-09', [rec]).flat().filter((c) => c.recurring > 0).map((c) => c.date);
 		expect(cells).toEqual(['2026-09-07', '2026-09-14', '2026-09-21', '2026-09-28']);
 	});
@@ -110,7 +110,7 @@ describe('előrejelzés', () => {
 			tx({ type: 'expense', amount: 20000, date: '2026-09-09', categoryId: 1 }),
 			tx({ type: 'expense', amount: 5000, date: '2026-09-10', categoryId: 1, recurringId: 1 }) // nem változó
 		];
-		const rec: Recurring = { id: 2, type: 'expense', amount: 8000, description: 'Netflix', categoryId: 1, accountId: 1, toAccountId: null, note: '', tags: [], frequency: 'monthly', interval: 1, startDate: '2026-09-25', endDate: null, lastHandled: null, active: true, createdAt: 1 };
+		const rec: Recurring = { id: 2, type: 'expense', amount: 8000, description: 'Netflix', categoryId: 1, accountId: 1, toAccountId: null, note: '', tags: [], frequency: 'monthly', interval: 1, startDate: '2026-09-25', endDate: null, lastHandled: null, active: true, createdAt: 1, updatedAt: 1 };
 		const f = forecastMonth({ txs, recurring: [rec], today: '2026-09-10', currentBalance: 100000 });
 		expect(f.spent).toBe(35000);
 		expect(f.daysLeft).toBe(20);
@@ -138,7 +138,7 @@ describe('előrejelzés', () => {
 });
 
 describe('célok', () => {
-	const goal: Goal = { id: 1, name: 'Laptop', icon: '💻', color: '#3b82f6', target: 300000, saved: 60000, accountId: null, deadline: '2027-03-29', archived: false, sortOrder: 1, createdAt: 1 };
+	const goal: Goal = { id: 1, name: 'Laptop', icon: '💻', color: '#3b82f6', target: 300000, saved: 60000, accountId: null, deadline: '2027-03-29', archived: false, sortOrder: 1, createdAt: 1, updatedAt: 1 };
 	it('kézi haladás és havi szükséges összeg', () => {
 		const p = goalProgress(goal, new Map(), '2026-09-29');
 		expect(p.current).toBe(60000);

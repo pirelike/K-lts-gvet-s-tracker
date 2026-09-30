@@ -16,6 +16,8 @@ import {
 } from './db/pin';
 import { LedgerRepo } from './db/repo';
 import { ledger } from './ledger.svelte';
+import { sync } from './sync/engine.svelte';
+import { toastForSyncEvent } from './sync/notify';
 import type { Prefs } from './types';
 
 export type Phase = 'boot' | 'unsupported' | 'error' | 'setup' | 'locked' | 'unlocked';
@@ -90,6 +92,21 @@ class Auth {
 			this.repo = new LedgerRepo(db);
 			ledger.attach(this.repo);
 			await this.repo.seedDefaultsIfNeeded();
+			// A szinkronmotor a főkönyv minden helyi módosításáról értesül; a hibája nem akadályozhatja az indulást.
+			ledger.onChange = () => sync.markDirty();
+			await sync
+				.attach({
+					repo: this.repo,
+					reload: () => ledger.reloadFromDb(),
+					unlocked: () => this.phase === 'unlocked',
+					onEvent: toastForSyncEvent,
+					// A működő szinkron egyben mentés is: a „régen volt mentés" emlékeztető ne jelenjen meg.
+					onSynced: (at) => {
+						this.lastBackupAt = at;
+						void this.saveSettings();
+					}
+				})
+				.catch(() => {});
 			this.pin = (await this.repo.getMeta<PinRecord>('pin')) ?? null;
 			const settings = await this.repo.getMeta<Settings>('settings');
 			if (settings) {
@@ -121,6 +138,7 @@ class Auth {
 	private async afterUnlock() {
 		await ledger.load();
 		this.phase = 'unlocked';
+		sync.start();
 		// Kérjük a böngészőt, hogy ne törölje az adatokat tárhelyhiány esetén.
 		try {
 			this.persisted = (await navigator.storage?.persist?.()) ?? null;
@@ -147,6 +165,8 @@ class Auth {
 	}
 
 	async unlock(pin: string): Promise<{ ok: true } | { ok: false; error: string; retryAt?: number }> {
+		// Még az első `await` előtt, a gombnyomás gesztusából: a Google tokenje csak így újítható meg csendben.
+		sync.prepareToken();
 		const repo = this.repo!;
 		const attempts = (await repo.getMeta<PinAttempts>('pinAttempts')) ?? { failures: 0, lockedUntil: 0 };
 		const now = Date.now();
@@ -170,6 +190,7 @@ class Auth {
 
 	lock() {
 		if (this.phase !== 'unlocked') return;
+		sync.stop();
 		ledger.clear();
 		this.phase = 'locked';
 	}
@@ -216,6 +237,7 @@ class Auth {
 	async wipeEverything() {
 		const repo = this.repo!;
 		await repo.wipeAll();
+		sync.reset();
 		ledger.clear();
 		this.pin = null;
 		this.autoLockSeconds = 60;

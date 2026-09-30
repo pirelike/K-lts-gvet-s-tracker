@@ -15,6 +15,7 @@
 	import { go, href, markHistory } from '$lib/nav';
 	import { runReminderChecks } from '$lib/notify';
 	import { isTypingTarget, resolveShortcut } from '$lib/shortcuts';
+	import { sync } from '$lib/sync/engine.svelte';
 	import { toasts } from '$lib/toast.svelte';
 	import { onMount, tick } from 'svelte';
 
@@ -133,6 +134,16 @@
 			clearInterval(id);
 			document.removeEventListener('visibilitychange', check);
 		};
+	});
+
+	// Átirányításos bejelentkezés (Dropbox) befejezése: a lap újratöltődött, a feloldás után zárul le a csatlakozás.
+	$effect(() => {
+		if (auth.phase !== 'unlocked') return;
+		void sync.resumeConnect().then((r) => {
+			if (!r) return;
+			if (r.ok) void go('/settings');
+			else toasts.error(r.error);
+		});
 	});
 
 	// A „+" gomb az űrlapokon felesleges.
