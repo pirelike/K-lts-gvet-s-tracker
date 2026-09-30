@@ -28,10 +28,13 @@ function haystack(t: Transaction): string {
 	return hay;
 }
 
-/** Legújabb elöl: dátum szerint csökkenő, azon belül létrehozás szerint csökkenő. */
+/**
+ * Legújabb elöl: dátum szerint csökkenő, azon belül létrehozás szerint csökkenő. Az azonosító már
+ * véletlen szám, ezért a létrehozás idejét (`createdAt`) nézzük; az id csak az egyenlőséget dönti el.
+ */
 export function compareTx(a: Transaction, b: Transaction): number {
 	if (a.date !== b.date) return a.date < b.date ? 1 : -1;
-	return b.id - a.id;
+	return b.createdAt - a.createdAt || b.id - a.id;
 }
 
 export function filterTransactions(txs: readonly Transaction[], f: TxFilters): Transaction[] {
@@ -266,7 +269,7 @@ export interface KnownDescription {
  * számla és összeg, valamint a használat gyakorisága.
  */
 export function knownDescriptions(txs: readonly Transaction[]): KnownDescription[] {
-	const map = new Map<string, KnownDescription & { lastDate: string; lastId: number }>();
+	const map = new Map<string, KnownDescription & { lastDate: string; lastCreated: number; lastId: number }>();
 	for (const t of txs) {
 		if ((t.type !== 'income' && t.type !== 'expense') || t.categoryId == null || !t.description) continue;
 		const folded = fold(t.description);
@@ -282,21 +285,29 @@ export function knownDescriptions(txs: readonly Transaction[]): KnownDescription
 				amount: t.amount,
 				count: 1,
 				lastDate: t.date,
+				lastCreated: t.createdAt,
 				lastId: t.id
 			});
 		} else {
 			cur.count++;
-			if (t.date > cur.lastDate || (t.date === cur.lastDate && t.id > cur.lastId)) {
+			const newer =
+				t.date !== cur.lastDate
+					? t.date > cur.lastDate
+					: t.createdAt !== cur.lastCreated
+						? t.createdAt > cur.lastCreated
+						: t.id > cur.lastId;
+			if (newer) {
 				cur.description = t.description;
 				cur.categoryId = t.categoryId;
 				cur.accountId = t.accountId;
 				cur.amount = t.amount;
 				cur.lastDate = t.date;
+				cur.lastCreated = t.createdAt;
 				cur.lastId = t.id;
 			}
 		}
 	}
-	return [...map.values()].map(({ lastDate: _d, lastId: _i, ...rest }) => rest);
+	return [...map.values()].map(({ lastDate: _d, lastCreated: _c, lastId: _i, ...rest }) => rest);
 }
 
 /** Találatok az autocomplete-hez: előbb a szóelejére illők, aztán gyakoriság szerint. */

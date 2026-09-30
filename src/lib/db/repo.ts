@@ -3,6 +3,7 @@
  * (fake-indexeddb-vel) is tesztelhető.
  */
 import type { Account, LedgerSnapshot, Prefs, Recurring, Transaction } from '../types';
+import { newId, recurringTxId } from '../sync/ids';
 import { DEFAULT_ACCOUNTS, DEFAULT_CATEGORIES } from './defaults';
 import { ALL_STORES, DATA_STORES, done, inferAccountType, wrap, type DataStore } from './idb';
 
@@ -33,7 +34,10 @@ export class LedgerRepo {
 		const data = emptyData() as Record<DataStore, unknown[]>;
 		await Promise.all(
 			DATA_STORES.map(async (s) => {
-				data[s] = await wrap(tx.objectStore(s).getAll());
+				// Az azonosítók véletlenek, a tároló mégis kulcs szerint adja vissza a sorokat: létrehozási
+				// sorrendbe (createdAt, azon belül id) rendezzük, mint amikor az autoIncrement id még időrendet adott.
+				const rows = (await wrap(tx.objectStore(s).getAll())) as { id: number; createdAt?: number }[];
+				data[s] = rows.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0) || a.id - b.id);
 			})
 		);
 		const out = data as unknown as LedgerData;
@@ -42,19 +46,45 @@ export class LedgerRepo {
 		return out;
 	}
 
+	/**
+	 * Új sor beszúrása. Az azonosítót nem az adatbázis osztja (autoIncrement), hanem `newId()`:
+	 * így két eszköz nem adhat ugyanazt az id-t két különböző sornak. Az `add` (nem `put`) ütközésnél
+	 * hibát ad, ilyenkor új id-val újrapróbáljuk (gyakorlatilag soha nem fordul elő).
+	 */
 	async add<T extends Row>(store: DataStore, value: NewRow<T>): Promise<T> {
-		const tx = this.db.transaction(store, 'readwrite');
-		const id = (await wrap(tx.objectStore(store).add(plain(value)))) as number;
-		await done(tx);
-		return { ...(value as object), id } as T;
+		const [row] = await this.addMany<T>(store, [value]);
+		return row;
 	}
 
 	async addMany<T extends Row>(store: DataStore, values: NewRow<T>[]): Promise<T[]> {
-		const tx = this.db.transaction(store, 'readwrite');
-		const os = tx.objectStore(store);
-		const ids = await Promise.all(values.map((v) => wrap(os.add(plain(v))) as Promise<number>));
-		await done(tx);
-		return values.map((v, i) => ({ ...(v as object), id: ids[i] }) as T);
+		if (values.length === 0) return [];
+		for (let attempt = 0; ; attempt++) {
+			const seen = new Set<number>();
+			const ids = values.map(() => {
+				let id = newId();
+				while (seen.has(id)) id = newId();
+				seen.add(id);
+				return id;
+			});
+			const tx = this.db.transaction(store, 'readwrite');
+			const os = tx.objectStore(store);
+			// A sikertelen `add` a tranzakciót is megszakítja; a kérés hibáját külön megjegyezzük,
+			// mert a tranzakció hibája ilyenkor még üres lehet.
+			const failure: { error: DOMException | null } = { error: null };
+			for (let i = 0; i < values.length; i++) {
+				const req = os.add({ ...plain(values[i]), id: ids[i] });
+				req.onerror = () => {
+					failure.error ??= req.error;
+				};
+			}
+			try {
+				await done(tx);
+			} catch (e) {
+				if (attempt < 3 && failure.error?.name === 'ConstraintError') continue;
+				throw failure.error ?? e;
+			}
+			return values.map((v, i) => ({ ...(v as object), id: ids[i] }) as T);
+		}
 	}
 
 	/** Beszúrás vagy felülírás a megadott azonosítóval (szerkesztés, törlés visszavonása). */
@@ -107,8 +137,9 @@ export class LedgerRepo {
 			return false;
 		}
 		const now = Date.now();
-		DEFAULT_ACCOUNTS.forEach((a, i) => tx.objectStore('accounts').add({ ...a, createdAt: now + i }));
-		DEFAULT_CATEGORIES.forEach((c, i) => tx.objectStore('categories').add({ ...c, createdAt: now + i }));
+		// Fix azonosítók: két friss eszközön ugyanazok az alapelemek jönnek létre (lásd `defaults.ts`).
+		DEFAULT_ACCOUNTS.forEach((a, i) => tx.objectStore('accounts').put({ ...a, createdAt: now + i }));
+		DEFAULT_CATEGORIES.forEach((c, i) => tx.objectStore('categories').put({ ...c, createdAt: now + i }));
 		meta.put({ key: 'initialized', value: true });
 		await done(tx);
 		return true;
@@ -125,6 +156,10 @@ export class LedgerRepo {
 		handledDate: string,
 		row: NewRow<Transaction> | null
 	): Promise<{ rule: Recurring; tx: Transaction | null } | null> {
+		// Az azonosító a szabályból és a napból képzett: ha másik eszközön is jóváhagyják ugyanezt az
+		// előfordulást, ugyanaz az id keletkezik, és összefésüléskor egy tétel marad. A tranzakció
+		// megnyitása előtt számoljuk ki: a Web Crypto `await`-je közben az IndexedDB-tranzakció lezárulna.
+		const txId = row ? await recurringTxId(ruleId, handledDate) : 0;
 		const t = this.db.transaction(['recurring', 'transactions'], 'readwrite');
 		const rules = t.objectStore('recurring');
 		const cur = (await wrap(rules.get(ruleId))) as Recurring | undefined;
@@ -136,8 +171,8 @@ export class LedgerRepo {
 		rules.put(plain(rule));
 		let added: Transaction | null = null;
 		if (row) {
-			const id = (await wrap(t.objectStore('transactions').add(plain(row)))) as number;
-			added = { ...(row as object), id } as Transaction;
+			t.objectStore('transactions').put({ ...plain(row), id: txId });
+			added = { ...(row as object), id: txId } as Transaction;
 		}
 		await done(t);
 		return { rule, tx: added };

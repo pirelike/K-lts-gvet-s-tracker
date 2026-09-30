@@ -6,6 +6,7 @@ import { DEFAULT_ACCOUNTS, DEFAULT_CATEGORIES } from '../src/lib/db/defaults';
 import { deleteLedgerDb, openLedgerDb } from '../src/lib/db/idb';
 import { createPinRecord, lockoutMs, pinFormatError, verifyPin } from '../src/lib/db/pin';
 import { LedgerRepo } from '../src/lib/db/repo';
+import { isNewId } from '../src/lib/sync/ids';
 import { accountBalances, summarize } from '../src/lib/queries';
 import type { Transaction } from '../src/lib/types';
 
@@ -47,7 +48,9 @@ describe('LedgerRepo', () => {
 		};
 		const a = await repo.add<Transaction>('transactions', base);
 		const b = await repo.add<Transaction>('transactions', { ...base, description: 'Lidl' });
-		expect(b.id).toBeGreaterThan(a.id);
+		// Az azonosítót nem az adatbázis osztja: eszközök között ütközésmentes, véletlen szám.
+		expect(isNewId(a.id) && isNewId(b.id)).toBe(true);
+		expect(b.id).not.toBe(a.id);
 
 		await repo.put('transactions', { ...a, amount: 1000 });
 		let all = (await repo.loadAll()).transactions;

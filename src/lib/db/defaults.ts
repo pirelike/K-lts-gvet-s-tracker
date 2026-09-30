@@ -1,15 +1,20 @@
 import type { Account, Category } from '../types';
 
-type NewCategory = Omit<Category, 'id' | 'createdAt'>;
-type NewAccount = Omit<Account, 'id' | 'createdAt'>;
+/** Az alapelemek azonosítója fix: két friss eszköz ugyanazokat hozza létre, szinkron után sincs duplikátum. */
+type NewCategory = Omit<Category, 'createdAt'>;
+type NewAccount = Omit<Account, 'createdAt'>;
 
+/** Az alap kategóriák azonosítói ettől indulnak (a számlák 1-től); a felhasználói elemeké `>= 2^32`. */
+export const DEFAULT_CATEGORY_ID_BASE = 101;
+
+let nextCategoryId = DEFAULT_CATEGORY_ID_BASE;
 const cat = (
 	type: 'income' | 'expense',
 	name: string,
 	icon: string,
 	color: string,
 	sortOrder: number
-): NewCategory => ({ type, name, icon, color, monthlyBudget: null, archived: false, sortOrder });
+): NewCategory => ({ id: nextCategoryId++, type, name, icon, color, monthlyBudget: null, archived: false, sortOrder });
 
 /** Alap kategóriák (mind szerkeszthető). */
 export const DEFAULT_CATEGORIES: NewCategory[] = [
@@ -29,9 +34,9 @@ export const DEFAULT_CATEGORIES: NewCategory[] = [
 ];
 
 export const DEFAULT_ACCOUNTS: NewAccount[] = [
-	{ name: 'Készpénz', type: 'cash', initialBalance: 0, archived: false, sortOrder: 1 },
-	{ name: 'Bankkártya', type: 'checking', initialBalance: 0, archived: false, sortOrder: 2 },
-	{ name: 'Megtakarítás', type: 'savings', initialBalance: 0, archived: false, sortOrder: 3 }
+	{ id: 1, name: 'Készpénz', type: 'cash', initialBalance: 0, archived: false, sortOrder: 1 },
+	{ id: 2, name: 'Bankkártya', type: 'checking', initialBalance: 0, archived: false, sortOrder: 2 },
+	{ id: 3, name: 'Megtakarítás', type: 'savings', initialBalance: 0, archived: false, sortOrder: 3 }
 ];
 
 /** Az egyenleg-egyeztetés korrekciós tételeinek kategóriája (kiadás és bevétel oldalon is létrejön, ha kell). */

@@ -182,7 +182,7 @@ export function analyzeSpending(
 		merchants: [...merch.values()]
 			.sort((a, b) => b.amount - a.amount || b.count - a.count)
 			.map(({ key: _k, ...rest }) => rest),
-		largest: expenses.sort((a, b) => b.amount - a.amount || b.id - a.id).slice(0, 5),
+		largest: expenses.sort((a, b) => b.amount - a.amount || b.createdAt - a.createdAt || b.id - a.id).slice(0, 5),
 		byWeekday: weekday.map((tot, i) => ({
 			weekday: i,
 			total: Math.max(0, tot),

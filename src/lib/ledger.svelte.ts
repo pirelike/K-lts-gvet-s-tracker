@@ -11,6 +11,7 @@ import { emptyData, type LedgerData, type LedgerRepo } from './db/repo';
 import { todayISO } from './dates';
 import type { ImportPlan } from './csvImport';
 import { PALETTE } from './palette';
+import { stamp } from './sync/stamp';
 import { accountBalances, accountUsage, categoryUsage } from './queries';
 import { fold } from './text';
 import { dueItems, nextOccurrence } from './recurring';
@@ -138,7 +139,7 @@ class Ledger {
 	// --- tranzakciók ---
 
 	async addTx(input: TxInput, extra: { recurringId?: number } = {}): Promise<Transaction> {
-		const now = Date.now();
+		const now = stamp();
 		const row = await this.db.add<Transaction>('transactions', {
 			...input,
 			tags: [...input.tags],
@@ -155,7 +156,7 @@ class Ledger {
 	async updateTx(id: number, input: TxInput): Promise<Transaction> {
 		const cur = this.transactions.find((t) => t.id === id);
 		if (!cur) throw new LedgerError('A tétel nem található');
-		const next: Transaction = { ...cur, ...input, tags: [...input.tags], id, updatedAt: Date.now() };
+		const next: Transaction = { ...cur, ...input, tags: [...input.tags], id, updatedAt: stamp() };
 		// A felosztás nem öröklődik: ha az új értékben nincs, a régi is eltűnik.
 		if (!input.splits) delete next.splits;
 		await this.db.put('transactions', next);
@@ -223,7 +224,7 @@ class Ledger {
 		const cat = patch.categoryId != null ? this.catById.get(patch.categoryId) : undefined;
 		if (patch.categoryId != null && !cat) throw new LedgerError('A kategória nem található');
 		if (patch.accountId != null && !this.accById.has(patch.accountId)) throw new LedgerError('A számla nem található');
-		const now = Date.now();
+		const now = stamp();
 		const changedRows: Transaction[] = [];
 		let skipped = 0;
 		const next = this.transactions.map((t) => {
@@ -272,7 +273,7 @@ class Ledger {
 	/** Több tétel hozzáadása egyszerre (CSV-import). */
 	async addTxs(inputs: TxInput[]): Promise<Transaction[]> {
 		if (inputs.length === 0) return [];
-		const now = Date.now();
+		const now = stamp(inputs.length);
 		const rows = await this.db.addMany<Transaction>(
 			'transactions',
 			inputs.map((input, i) => ({
@@ -357,7 +358,7 @@ class Ledger {
 			monthlyBudget: type === 'expense' ? (v.monthlyBudget ?? null) : null,
 			archived: false,
 			sortOrder: order + 1,
-			createdAt: Date.now()
+			createdAt: stamp()
 		});
 		this.categories = [...this.categories, row];
 		this.notify();
@@ -448,7 +449,7 @@ class Ledger {
 			initialBalance: v.initialBalance,
 			archived: false,
 			sortOrder: order + 1,
-			createdAt: Date.now()
+			createdAt: stamp()
 		});
 		this.accounts = [...this.accounts, row];
 		this.notify();
@@ -549,7 +550,7 @@ class Ledger {
 			tags: [...v.tags],
 			lastHandled: null,
 			active: true,
-			createdAt: Date.now()
+			createdAt: stamp()
 		});
 		this.recurring = [...this.recurring, row];
 		this.notify();
@@ -599,7 +600,7 @@ class Ledger {
 		}
 		let row: Omit<Transaction, 'id'> | null = null;
 		if (mode === 'approve') {
-			const now = Date.now();
+			const now = stamp();
 			row = {
 				type: rule.type,
 				amount: opts.amount ?? rule.amount,
@@ -635,7 +636,7 @@ class Ledger {
 			...v,
 			tags: [...v.tags],
 			sortOrder: order + 1,
-			createdAt: Date.now()
+			createdAt: stamp()
 		});
 		this.templates = [...this.templates, row];
 		this.notify();
@@ -671,7 +672,7 @@ class Ledger {
 
 	async addGoal(v: GoalInput): Promise<Goal> {
 		const order = Math.max(0, ...this.goals.map((g) => g.sortOrder));
-		const row = await this.db.add<Goal>('goals', { ...v, archived: false, sortOrder: order + 1, createdAt: Date.now() });
+		const row = await this.db.add<Goal>('goals', { ...v, archived: false, sortOrder: order + 1, createdAt: stamp() });
 		this.goals = [...this.goals, row];
 		this.notify();
 		return row;
@@ -725,7 +726,7 @@ class Ledger {
 	// --- mentett szűrők ---
 
 	async addFilter(name: string, query: string): Promise<SavedFilter> {
-		const row = await this.db.add<SavedFilter>('filters', { name, query, createdAt: Date.now() });
+		const row = await this.db.add<SavedFilter>('filters', { name, query, createdAt: stamp() });
 		this.filters = [...this.filters, row];
 		this.notify();
 		return row;
@@ -805,8 +806,11 @@ class Ledger {
 	// --- példaadatok, mentés ---
 
 	async loadDemoData(today: string = todayISO()): Promise<number> {
-		const rows = generateDemoTransactions(today, this.accounts, this.categories);
-		if (rows.length === 0) return 0;
+		const generated = generateDemoTransactions(today, this.accounts, this.categories);
+		if (generated.length === 0) return 0;
+		// A generátor saját időbélyeget ad; a főkönyv szigorúan növekvő sorozatához igazítjuk.
+		const base = stamp(generated.length);
+		const rows = generated.map((t, i) => ({ ...t, createdAt: base + i, updatedAt: base + i }));
 		const added = await this.db.addMany<Transaction>('transactions', rows);
 		this.transactions = [...this.transactions, ...added];
 		this.notify();
