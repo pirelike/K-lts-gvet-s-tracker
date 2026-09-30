@@ -430,3 +430,26 @@ után döntöttem el; a tervezett viselkedés (ütközésmentes id-k, LWW, jelö
 - **Ismert, korábbról meglévő hiba:** az `e2e/features.mjs` „természetes nyelvű gyorsbevitel: kávé 891 tegnap"
   lépése a `main`-en, a szinkron-változtatások nélkül is elbukik. Nem ehhez a munkához tartozik.
 
+### 4. fázis (`merge.ts`)
+
+- **Az asszociativitás a rekordszintű részre igaz, egy ismert kivétellel.** A `merge(merge(a,b),c) ≡
+  merge(a,merge(b,c))` tulajdonságot a véletlen műveletsoros teszt a hivatkozás-javítás nélküli összefésülésre
+  (`mergeStates(..., { repair: false })`) ellenőrzi. Kivétel: ha egy köztes összefésülés egy ismétlődő szabályt
+  a törlési jelölő miatt eldob, majd a szabályt később újraszerkesztik, az eldobott `lastHandled` elveszhet.
+  Következménye legfeljebb egy újra felkínált előfordulás, amit a determinisztikus tétel-azonosító
+  (`recurringTxId`) miatt nem lehet megduplázni. A hivatkozás-javítás (visszaélesztés) eleve nem asszociatív,
+  mert attól függ, hogy a hivatkozó tétel az összefésülés pillanatában él-e.
+- **Konvergencia felhő-közvetített szinkronnál** (`merge(felhő, helyi)`, majd mindkettő az eredmény): a teszt
+  4000 véletlen magon futott, mindig megállt. Ritkán (1/4000) három elcsendesedési kör kell két helyett, ha egy
+  visszaélesztett kategória jelölőjét egy elmaradt eszköz még tartalmazza. Végtelen körforgás nem alakul ki.
+- **`report` kibővítve**: `transactions` (a tételek külön számlálója az értesítésekhez) és `epochWinner`
+  (eltérő korszaknál melyik oldal nyert). Az `epochLost` az `opts.syncedAt` (az utolsó sikeres szinkron ideje)
+  óta módosított helyi rekordok, jelölők és a beállítás száma.
+- **`remapIds` kiegészítés:** opcionális `match` (a másik oldal adatai). Egy átszámozandó régi számla vagy
+  kategória, ha típus és név szerint egyezik egy ottanival, annak az azonosítóját kapja (elsőként az azonos
+  id + név). Így a két oldal alapelemeiből (pl. „Étel") nem lesz duplikátum. Egy távoli azonosítóra legfeljebb
+  egy helyi elem képződik.
+- **`hasOwnData`** (a *4.5* 2. pontjához): a saját tétel, a szerkesztett vagy létrehozott elem, az ismétlődő,
+  sablon, cél, mentett szűrő és a beállított keret is „saját adat". Az érintetlen alapelemek (`updatedAt` = 0)
+  és a példaadatok nem. Óvatos: gyanús esetben a felhasználó dönt.
+- **`validateState`** a `makeBackup` + `parseBackup` láncot futtatja, és csak `ok`/hibaüzenetet ad vissza.
