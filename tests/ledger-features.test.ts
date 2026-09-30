@@ -368,3 +368,164 @@ describe('CSV-import a főkönyvben', () => {
 		expect(ledger.categories.some((c) => c.name === 'Csak ehhez kellene')).toBe(false);
 	});
 });
+
+describe('updatedAt: minden módosítás új időbélyeget kap (a szinkronhoz)', () => {
+	const rule = (): RecurringInput => ({
+		type: 'expense', amount: 1000, description: 'Albérlet', categoryId: cat('expense', 'Étel').id, accountId: acc('Készpénz').id,
+		toAccountId: null, note: '', tags: [], frequency: 'monthly', interval: 1, startDate: '2026-09-05', endDate: null
+	});
+
+	it('az új rekordok createdAt = updatedAt értékkel jönnek létre', async () => {
+		const c = await ledger.addCategory('expense', { name: 'Új', color: '#112233', icon: '' });
+		const a = await ledger.addAccount({ name: 'Új számla', initialBalance: 0 });
+		const r = await ledger.addRecurring(rule());
+		const t = await ledger.addTemplate({ name: 'Sablon', type: 'expense', amount: null, description: '', categoryId: null, accountId: null, toAccountId: null, note: '', tags: [] });
+		const g = await ledger.addGoal({ name: 'Cél', icon: '🎯', color: '#4f46e5', target: 1000, saved: 0, accountId: null, deadline: null });
+		const f = await ledger.addFilter('Szűrő', 'q=a');
+		for (const row of [c, a, r, t, g, f]) expect(row.updatedAt).toBe(row.createdAt);
+		// és az adatbázisban is
+		const d = await repo.loadAll();
+		expect(d.categories.find((x) => x.id === c.id)!.updatedAt).toBe(c.createdAt);
+		expect(d.filters.find((x) => x.id === f.id)!.updatedAt).toBe(f.createdAt);
+	});
+
+	it('kategória: szerkesztés, keret, archiválás, mozgatás', async () => {
+		const c = cat('expense', 'Közlekedés');
+		const seen = [c.updatedAt];
+		const check = () => {
+			const u = cat('expense', 'Közlekedés').updatedAt;
+			expect(u).toBeGreaterThan(seen[seen.length - 1]);
+			seen.push(u);
+		};
+		await ledger.updateCategory(c.id, { name: 'Közlekedés', color: '#3b82f6', icon: '🚌' });
+		check();
+		await ledger.setCategoryBudget(c.id, 20000);
+		check();
+		await ledger.setCategoryArchived(c.id, true);
+		check();
+		await ledger.setCategoryArchived(c.id, false);
+		check();
+		await ledger.moveCategory(c.id, -1);
+		const moved = ledger.categories.filter((x) => x.updatedAt > 0);
+		expect(moved.length).toBeGreaterThan(0); // a sorrend-cserében érintett sorok mind kaptak időbélyeget
+		expect(cat('expense', 'Közlekedés').updatedAt).toBeGreaterThan(seen[seen.length - 1]);
+	});
+
+	it('számla: szerkesztés, archiválás, mozgatás, a törlés a hivatkozókat is bélyegzi', async () => {
+		const a = await ledger.addAccount({ name: 'Ideiglenes', initialBalance: 0 });
+		const goal = await ledger.addGoal({ name: 'Cél', icon: '🎯', color: '#4f46e5', target: 1000, saved: 0, accountId: a.id, deadline: null });
+		const tpl = await ledger.addTemplate({ name: 'S', type: 'expense', amount: null, description: '', categoryId: null, accountId: a.id, toAccountId: null, note: '', tags: [] });
+		await ledger.updateAccount(a.id, { name: 'Ideiglenes 2', initialBalance: 5 });
+		expect(ledger.accById.get(a.id)!.updatedAt).toBeGreaterThan(a.updatedAt);
+		await ledger.setAccountArchived(a.id, true);
+		expect(ledger.accById.get(a.id)!.updatedAt).toBeGreaterThan(a.updatedAt);
+		await ledger.setAccountArchived(a.id, false);
+		await ledger.deleteAccount(a.id);
+		expect(ledger.goals.find((g) => g.id === goal.id)!.updatedAt).toBeGreaterThan(goal.updatedAt);
+		expect(ledger.goals.find((g) => g.id === goal.id)!.accountId).toBeNull();
+		expect(ledger.templates.find((t) => t.id === tpl.id)!.updatedAt).toBeGreaterThan(tpl.updatedAt);
+		const before = acc('Bankkártya').updatedAt;
+		await ledger.moveAccount(acc('Bankkártya').id, -1);
+		expect(acc('Bankkártya').updatedAt).toBeGreaterThan(before);
+	});
+
+	it('kategória törlése a sablon hivatkozását ürítő módosítást bélyegzi', async () => {
+		const c = await ledger.addCategory('expense', { name: 'Törlendő', color: '#112233', icon: '' });
+		const tpl = await ledger.addTemplate({ name: 'S', type: 'expense', amount: null, description: '', categoryId: c.id, accountId: null, toAccountId: null, note: '', tags: [] });
+		await ledger.deleteCategory(c.id);
+		const after = ledger.templates.find((t) => t.id === tpl.id)!;
+		expect(after.categoryId).toBeNull();
+		expect(after.updatedAt).toBeGreaterThan(tpl.updatedAt);
+	});
+
+	it('ismétlődő szabály: szerkesztés, be/kikapcsolás, előfordulás feldolgozása', async () => {
+		const r = await ledger.addRecurring(rule());
+		await ledger.updateRecurring(r.id, { ...rule(), amount: 2000 });
+		const u1 = ledger.recurring[0].updatedAt;
+		expect(u1).toBeGreaterThan(r.updatedAt);
+		await ledger.setRecurringActive(r.id, false);
+		const u2 = ledger.recurring[0].updatedAt;
+		expect(u2).toBeGreaterThan(u1);
+		await ledger.setRecurringActive(r.id, true);
+		await ledger.handleRecurring(r.id, '2026-09-05', 'approve');
+		expect(ledger.recurring[0].lastHandled).toBe('2026-09-05');
+		expect(ledger.recurring[0].updatedAt).toBeGreaterThan(u2);
+		expect((await repo.loadAll()).recurring[0].updatedAt).toBe(ledger.recurring[0].updatedAt);
+	});
+
+	it('sablon és cél: átnevezés, szerkesztés, befizetés, archiválás, mozgatás', async () => {
+		const t = await ledger.addTemplate({ name: 'S', type: 'expense', amount: null, description: '', categoryId: null, accountId: null, toAccountId: null, note: '', tags: [] });
+		const t2 = await ledger.addTemplate({ name: 'S2', type: 'expense', amount: null, description: '', categoryId: null, accountId: null, toAccountId: null, note: '', tags: [] });
+		await ledger.renameTemplate(t.id, 'Átnevezett');
+		expect(ledger.templates.find((x) => x.id === t.id)!.updatedAt).toBeGreaterThan(t.updatedAt);
+		await ledger.moveTemplate(t2.id, -1);
+		expect(ledger.templates.find((x) => x.id === t2.id)!.updatedAt).toBeGreaterThan(t2.updatedAt);
+
+		const g = await ledger.addGoal({ name: 'Cél', icon: '🎯', color: '#4f46e5', target: 1000, saved: 0, accountId: null, deadline: null });
+		const g2 = await ledger.addGoal({ name: 'Cél 2', icon: '🎯', color: '#4f46e5', target: 1000, saved: 0, accountId: null, deadline: null });
+		let last = g.updatedAt;
+		const now = () => ledger.goals.find((x) => x.id === g.id)!.updatedAt;
+		await ledger.updateGoal(g.id, { name: 'Cél!', icon: '🎯', color: '#4f46e5', target: 2000, saved: 0, accountId: null, deadline: null });
+		expect(now()).toBeGreaterThan(last);
+		last = now();
+		await ledger.addToGoal(g.id, 500);
+		expect(now()).toBeGreaterThan(last);
+		last = now();
+		await ledger.moveGoal(g2.id, -1);
+		expect(ledger.goals.find((x) => x.id === g2.id)!.updatedAt).toBeGreaterThan(g2.updatedAt);
+		last = now();
+		await ledger.setGoalArchived(g.id, true);
+		expect(now()).toBeGreaterThan(last);
+	});
+
+	it('tétel: szerkesztés, csoportos módosítás és mindkét visszavonás új időbélyeget ad', async () => {
+		const t = await ledger.addTx(expense());
+		const u = await ledger.updateTx(t.id, { ...expense(), amount: 2000 });
+		expect(u.updatedAt).toBeGreaterThan(t.updatedAt);
+
+		const before = ledger.transactions.find((x) => x.id === t.id)!;
+		await ledger.updateTxs([t.id], { addTags: ['x'] });
+		const bulk = ledger.transactions.find((x) => x.id === t.id)!;
+		expect(bulk.updatedAt).toBeGreaterThan(before.updatedAt);
+		await ledger.replaceTxs([before]); // a csoportos módosítás visszavonása
+		const undone = ledger.transactions.find((x) => x.id === t.id)!;
+		expect(undone.tags).toEqual([]);
+		expect(undone.updatedAt).toBeGreaterThan(bulk.updatedAt); // különben a másik eszköz változata nyerne
+
+		const snap = await ledger.deleteTx(t.id);
+		await ledger.restoreTx(snap);
+		expect(ledger.transactions.find((x) => x.id === t.id)!.updatedAt).toBeGreaterThan(snap.updatedAt);
+		const snaps = await ledger.deleteTxs([t.id]);
+		await ledger.restoreTxs(snaps);
+		expect(ledger.transactions.find((x) => x.id === t.id)!.updatedAt).toBeGreaterThan(snaps[0].updatedAt);
+	});
+
+	it('az alapelemek updatedAt értéke 0, így bármilyen szerkesztés újabb náluk', () => {
+		const seeded = ledger.accounts.filter((a) => a.id < 100);
+		expect(seeded.length).toBeGreaterThan(0);
+		expect(seeded.every((a) => a.updatedAt === 0)).toBe(true);
+		expect(ledger.categories.filter((c) => c.id < 1000).every((c) => c.updatedAt === 0)).toBe(true);
+	});
+
+	it('beállítások: a keret módosítása bélyegzi a prefsUpdatedAt értéket, és tartós', async () => {
+		expect(ledger.prefsUpdatedAt).toBe(0);
+		await ledger.setTotalBudget(100000);
+		const first = ledger.prefsUpdatedAt;
+		expect(first).toBeGreaterThan(0);
+		await ledger.setTotalBudget(null);
+		expect(ledger.prefsUpdatedAt).toBeGreaterThan(first);
+		const at = ledger.prefsUpdatedAt;
+		await ledger.load();
+		expect(ledger.prefsUpdatedAt).toBe(at);
+		expect(ledger.prefs).toEqual({ currency: 'HUF', totalBudget: null }); // az updatedAt nem szivárog a Prefs-be
+	});
+
+	it('pénznemváltás és visszatöltés is bélyegzi a beállításokat', async () => {
+		await ledger.switchCurrency('EUR', 395);
+		expect(ledger.prefsUpdatedAt).toBeGreaterThan(0);
+		const backup = ledger.exportBackup();
+		const at = ledger.prefsUpdatedAt;
+		await ledger.importBackup(backup);
+		expect(ledger.prefsUpdatedAt).toBeGreaterThan(at);
+	});
+});

@@ -333,7 +333,7 @@ export interface RecurringFormValues {
 export type RecurringField = 'amount' | 'description' | 'category' | 'account' | 'toAccount' | 'interval' | 'startDate' | 'endDate' | 'tags';
 
 /** A szabály mezői a technikai adatok (azonosító, feldolgozás állapota) nélkül. */
-export type RecurringInput = Omit<NewRecurring, 'lastHandled' | 'active' | 'createdAt'>;
+export type RecurringInput = Omit<NewRecurring, 'lastHandled' | 'active' | 'createdAt' | 'updatedAt'>;
 
 export function validateRecurring(
 	v: RecurringFormValues,
@@ -394,7 +394,7 @@ export function validateRecurring(
 
 // --- sablonok ---
 
-export type TemplateInput = Omit<Template, 'id' | 'sortOrder' | 'createdAt'>;
+export type TemplateInput = Omit<Template, 'id' | 'sortOrder' | 'createdAt' | 'updatedAt'>;
 
 export function validateTemplateName(name: string, all: Template[], editingId?: number): string | null {
 	const n = name.trim();
@@ -416,7 +416,7 @@ export interface GoalFormValues {
 	deadline: string;
 }
 export type GoalField = 'name' | 'target' | 'saved' | 'deadline' | 'icon' | 'color';
-export type GoalInput = Omit<Goal, 'id' | 'archived' | 'sortOrder' | 'createdAt'>;
+export type GoalInput = Omit<Goal, 'id' | 'archived' | 'sortOrder' | 'createdAt' | 'updatedAt'>;
 
 export function validateGoal(v: GoalFormValues, all: Goal[], editingId?: number): Validated<GoalInput, GoalField> {
 	const errors: Errors<GoalField> = {};

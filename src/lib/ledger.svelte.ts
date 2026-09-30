@@ -59,6 +59,8 @@ class Ledger {
 	goals = $state.raw<Goal[]>([]);
 	filters = $state.raw<SavedFilter[]>([]);
 	prefs = $state.raw<Prefs>(DEFAULT_PREFS);
+	/** A beállítások utolsó módosításának ideje (a szinkronhoz). */
+	prefsUpdatedAt = $state.raw(0);
 	loaded = $state(false);
 
 	catById = $derived(new Map(this.categories.map((c) => [c.id, c])));
@@ -98,9 +100,10 @@ class Ledger {
 
 	async load() {
 		const data = await this.db.loadAll();
-		const prefs = (await this.db.getMeta<Prefs>('prefs')) ?? DEFAULT_PREFS;
+		const { prefs, updatedAt } = await this.db.getPrefs();
 		setActiveCurrency(prefs.currency);
-		this.prefs = { ...DEFAULT_PREFS, ...prefs };
+		this.prefs = prefs;
+		this.prefsUpdatedAt = updatedAt;
 		this.accounts = data.accounts;
 		this.categories = data.categories;
 		this.transactions = data.transactions;
@@ -196,18 +199,25 @@ class Ledger {
 		);
 	}
 
-	/** Törlés visszavonása: ugyanazzal az azonosítóval visszakerül a tétel. */
+	/**
+	 * Törlés visszavonása: ugyanazzal az azonosítóval visszakerül a tétel. Az `updatedAt` frissül, hogy a
+	 * visszaállított tétel az összefésülésnél az újabb legyen a törlési jelölőnél.
+	 */
 	async restoreTx(snapshot: Transaction): Promise<void> {
 		if (this.transactions.some((t) => t.id === snapshot.id)) return;
 		if (!this.refsOk(snapshot)) throw new LedgerError('A tétel kategóriája vagy számlája időközben megszűnt');
-		await this.db.put('transactions', snapshot);
-		this.transactions = [...this.transactions, snapshot];
+		const row = { ...snapshot, updatedAt: stamp() };
+		await this.db.put('transactions', row);
+		this.transactions = [...this.transactions, row];
 		this.notify();
 	}
 
 	async restoreTxs(snapshots: Transaction[]): Promise<number> {
 		const have = new Set(this.transactions.map((t) => t.id));
-		const back = snapshots.filter((s) => !have.has(s.id) && this.refsOk(s));
+		const now = stamp(snapshots.length);
+		const back = snapshots
+			.filter((s) => !have.has(s.id) && this.refsOk(s))
+			.map((s, i) => ({ ...s, updatedAt: now + i }));
 		if (back.length === 0) return 0;
 		await this.db.putMany('transactions', back);
 		this.transactions = [...this.transactions, ...back];
@@ -261,10 +271,12 @@ class Ledger {
 		return { changed: changedRows.length, skipped };
 	}
 
-	/** Meglévő tételek felülírása a megadott állapotra (a csoportos módosítás visszavonása). */
+	/** Meglévő tételek felülírása a megadott állapotra (a csoportos módosítás visszavonása); az `updatedAt` frissül. */
 	async replaceTxs(rows: Transaction[]): Promise<void> {
-		const by = new Map(rows.map((r) => [r.id, r]));
-		const present = rows.filter((r) => this.transactions.some((t) => t.id === r.id) && this.refsOk(r));
+		const now = stamp(rows.length);
+		const stamped = rows.map((r, i) => ({ ...r, updatedAt: now + i }));
+		const by = new Map(stamped.map((r) => [r.id, r]));
+		const present = stamped.filter((r) => this.transactions.some((t) => t.id === r.id) && this.refsOk(r));
 		await this.db.putMany('transactions', present);
 		this.transactions = this.transactions.map((t) => (by.has(t.id) && present.includes(by.get(t.id)!) ? by.get(t.id)! : t));
 		this.notify();
@@ -350,6 +362,7 @@ class Ledger {
 		v: { name: string; color: string; icon: string; monthlyBudget?: number | null }
 	): Promise<Category> {
 		const order = Math.max(0, ...this.categories.filter((c) => c.type === type).map((c) => c.sortOrder));
+		const now = stamp();
 		const row = await this.db.add<Category>('categories', {
 			name: v.name,
 			type,
@@ -358,7 +371,8 @@ class Ledger {
 			monthlyBudget: type === 'expense' ? (v.monthlyBudget ?? null) : null,
 			archived: false,
 			sortOrder: order + 1,
-			createdAt: stamp()
+			createdAt: now,
+			updatedAt: now
 		});
 		this.categories = [...this.categories, row];
 		this.notify();
@@ -371,7 +385,7 @@ class Ledger {
 	) {
 		const cur = this.catById.get(id);
 		if (!cur) throw new LedgerError('A kategória nem található');
-		const next: Category = { ...cur, name: v.name, color: v.color, icon: v.icon };
+		const next: Category = { ...cur, name: v.name, color: v.color, icon: v.icon, updatedAt: stamp() };
 		if (v.monthlyBudget !== undefined && cur.type === 'expense') next.monthlyBudget = v.monthlyBudget;
 		await this.db.put('categories', next);
 		this.categories = this.categories.map((c) => (c.id === id ? next : c));
@@ -385,7 +399,7 @@ class Ledger {
 		if (budget != null && (!Number.isInteger(budget) || budget <= 0 || budget > MAX_AMOUNT)) {
 			throw new LedgerError('A keret pozitív összeg legyen');
 		}
-		const next = { ...cur, monthlyBudget: budget };
+		const next = { ...cur, monthlyBudget: budget, updatedAt: stamp() };
 		await this.db.put('categories', next);
 		this.categories = this.categories.map((c) => (c.id === id ? next : c));
 		this.notify();
@@ -394,7 +408,7 @@ class Ledger {
 	async setCategoryArchived(id: number, archived: boolean) {
 		const cur = this.catById.get(id);
 		if (!cur) throw new LedgerError('A kategória nem található');
-		const next = { ...cur, archived };
+		const next = { ...cur, archived, updatedAt: stamp() };
 		await this.db.put('categories', next);
 		this.categories = this.categories.map((c) => (c.id === id ? next : c));
 		this.notify();
@@ -408,7 +422,8 @@ class Ledger {
 		await this.db.remove('categories', id);
 		this.categories = this.categories.filter((c) => c.id !== id);
 		// A sablonokból kiürül a megszűnt kategória (a sablon megmarad).
-		const stale = this.templates.filter((t) => t.categoryId === id).map((t) => ({ ...t, categoryId: null }));
+		const at = stamp();
+		const stale = this.templates.filter((t) => t.categoryId === id).map((t) => ({ ...t, categoryId: null, updatedAt: at }));
 		if (stale.length) {
 			await this.db.putMany('templates', stale);
 			this.templates = this.templates.map((t) => stale.find((s) => s.id === t.id) ?? t);
@@ -421,7 +436,7 @@ class Ledger {
 		const cur = this.catById.get(id);
 		if (!cur) throw new LedgerError('A kategória nem található');
 		const group = this.categories.filter((c) => c.type === cur.type && !c.archived).sort(byOrder);
-		const changed = reorder(group, id, dir);
+		const changed = reorder(group, id, dir, stamp());
 		if (!changed.length) return;
 		await this.db.putMany('categories', changed);
 		const by = new Map(changed.map((c) => [c.id, c]));
@@ -443,13 +458,15 @@ class Ledger {
 
 	async addAccount(v: Pick<AccountValues, 'name' | 'initialBalance'> & { type?: AccountType }): Promise<Account> {
 		const order = Math.max(0, ...this.accounts.map((a) => a.sortOrder));
+		const now = stamp();
 		const row = await this.db.add<Account>('accounts', {
 			name: v.name,
 			type: v.type ?? 'checking',
 			initialBalance: v.initialBalance,
 			archived: false,
 			sortOrder: order + 1,
-			createdAt: stamp()
+			createdAt: now,
+			updatedAt: now
 		});
 		this.accounts = [...this.accounts, row];
 		this.notify();
@@ -459,7 +476,7 @@ class Ledger {
 	async updateAccount(id: number, v: Pick<AccountValues, 'name' | 'initialBalance'> & { type?: AccountType }) {
 		const cur = this.accById.get(id);
 		if (!cur) throw new LedgerError('A számla nem található');
-		const next = { ...cur, ...v, type: v.type ?? cur.type };
+		const next = { ...cur, ...v, type: v.type ?? cur.type, updatedAt: stamp() };
 		await this.db.put('accounts', next);
 		this.accounts = this.accounts.map((a) => (a.id === id ? next : a));
 		this.notify();
@@ -468,7 +485,7 @@ class Ledger {
 	async setAccountArchived(id: number, archived: boolean) {
 		const cur = this.accById.get(id);
 		if (!cur) throw new LedgerError('A számla nem található');
-		const next = { ...cur, archived };
+		const next = { ...cur, archived, updatedAt: stamp() };
 		await this.db.put('accounts', next);
 		this.accounts = this.accounts.map((a) => (a.id === id ? next : a));
 		this.notify();
@@ -481,13 +498,15 @@ class Ledger {
 		await this.db.remove('accounts', id);
 		this.accounts = this.accounts.filter((a) => a.id !== id);
 		// A célok és sablonok hivatkozása kiürül (maguk megmaradnak).
-		const goals = this.goals.filter((g) => g.accountId === id).map((g) => ({ ...g, accountId: null }));
+		const at = stamp();
+		const goals = this.goals.filter((g) => g.accountId === id).map((g) => ({ ...g, accountId: null, updatedAt: at }));
 		const templates = this.templates
 			.filter((t) => t.accountId === id || t.toAccountId === id)
 			.map((t) => ({
 				...t,
 				accountId: t.accountId === id ? null : t.accountId,
-				toAccountId: t.toAccountId === id ? null : t.toAccountId
+				toAccountId: t.toAccountId === id ? null : t.toAccountId,
+				updatedAt: at
 			}));
 		if (goals.length) {
 			await this.db.putMany('goals', goals);
@@ -503,7 +522,7 @@ class Ledger {
 	async moveAccount(id: number, dir: -1 | 1) {
 		if (!this.accById.has(id)) throw new LedgerError('A számla nem található');
 		const group = this.accounts.filter((a) => !a.archived).sort(byOrder);
-		const changed = reorder(group, id, dir);
+		const changed = reorder(group, id, dir, stamp());
 		if (!changed.length) return;
 		await this.db.putMany('accounts', changed);
 		const by = new Map(changed.map((a) => [a.id, a]));
@@ -545,12 +564,14 @@ class Ledger {
 	// --- ismétlődő tételek ---
 
 	async addRecurring(v: RecurringInput): Promise<Recurring> {
+		const now = stamp();
 		const row = await this.db.add<Recurring>('recurring', {
 			...v,
 			tags: [...v.tags],
 			lastHandled: null,
 			active: true,
-			createdAt: stamp()
+			createdAt: now,
+			updatedAt: now
 		});
 		this.recurring = [...this.recurring, row];
 		this.notify();
@@ -560,7 +581,7 @@ class Ledger {
 	async updateRecurring(id: number, v: RecurringInput) {
 		const cur = this.recurring.find((r) => r.id === id);
 		if (!cur) throw new LedgerError('Az ismétlődő tétel nem található');
-		const next: Recurring = { ...cur, ...v, tags: [...v.tags] };
+		const next: Recurring = { ...cur, ...v, tags: [...v.tags], updatedAt: stamp() };
 		await this.db.put('recurring', next);
 		this.recurring = this.recurring.map((r) => (r.id === id ? next : r));
 		this.notify();
@@ -569,7 +590,7 @@ class Ledger {
 	async setRecurringActive(id: number, active: boolean) {
 		const cur = this.recurring.find((r) => r.id === id);
 		if (!cur) throw new LedgerError('Az ismétlődő tétel nem található');
-		const next = { ...cur, active };
+		const next = { ...cur, active, updatedAt: stamp() };
 		await this.db.put('recurring', next);
 		this.recurring = this.recurring.map((r) => (r.id === id ? next : r));
 		this.notify();
@@ -632,11 +653,13 @@ class Ledger {
 
 	async addTemplate(v: TemplateInput): Promise<Template> {
 		const order = Math.max(0, ...this.templates.map((t) => t.sortOrder));
+		const now = stamp();
 		const row = await this.db.add<Template>('templates', {
 			...v,
 			tags: [...v.tags],
 			sortOrder: order + 1,
-			createdAt: stamp()
+			createdAt: now,
+			updatedAt: now
 		});
 		this.templates = [...this.templates, row];
 		this.notify();
@@ -646,7 +669,7 @@ class Ledger {
 	async renameTemplate(id: number, name: string) {
 		const cur = this.templates.find((t) => t.id === id);
 		if (!cur) throw new LedgerError('A sablon nem található');
-		const next = { ...cur, name };
+		const next = { ...cur, name, updatedAt: stamp() };
 		await this.db.put('templates', next);
 		this.templates = this.templates.map((t) => (t.id === id ? next : t));
 		this.notify();
@@ -660,7 +683,7 @@ class Ledger {
 
 	async moveTemplate(id: number, dir: -1 | 1) {
 		const group = [...this.templates].sort(byOrder);
-		const changed = reorder(group, id, dir);
+		const changed = reorder(group, id, dir, stamp());
 		if (!changed.length) return;
 		await this.db.putMany('templates', changed);
 		const by = new Map(changed.map((t) => [t.id, t]));
@@ -672,7 +695,8 @@ class Ledger {
 
 	async addGoal(v: GoalInput): Promise<Goal> {
 		const order = Math.max(0, ...this.goals.map((g) => g.sortOrder));
-		const row = await this.db.add<Goal>('goals', { ...v, archived: false, sortOrder: order + 1, createdAt: stamp() });
+		const now = stamp();
+		const row = await this.db.add<Goal>('goals', { ...v, archived: false, sortOrder: order + 1, createdAt: now, updatedAt: now });
 		this.goals = [...this.goals, row];
 		this.notify();
 		return row;
@@ -681,7 +705,7 @@ class Ledger {
 	async updateGoal(id: number, v: GoalInput) {
 		const cur = this.goals.find((g) => g.id === id);
 		if (!cur) throw new LedgerError('A cél nem található');
-		const next = { ...cur, ...v };
+		const next = { ...cur, ...v, updatedAt: stamp() };
 		await this.db.put('goals', next);
 		this.goals = this.goals.map((g) => (g.id === id ? next : g));
 		this.notify();
@@ -692,7 +716,7 @@ class Ledger {
 		const cur = this.goals.find((g) => g.id === id);
 		if (!cur) throw new LedgerError('A cél nem található');
 		if (!Number.isInteger(delta)) throw new LedgerError('Érvénytelen összeg');
-		const next = { ...cur, saved: Math.max(0, Math.min(MAX_AMOUNT, cur.saved + delta)) };
+		const next = { ...cur, saved: Math.max(0, Math.min(MAX_AMOUNT, cur.saved + delta)), updatedAt: stamp() };
 		await this.db.put('goals', next);
 		this.goals = this.goals.map((g) => (g.id === id ? next : g));
 		this.notify();
@@ -700,7 +724,7 @@ class Ledger {
 
 	async moveGoal(id: number, dir: -1 | 1) {
 		const group = this.goals.filter((g) => !g.archived).sort(byOrder);
-		const changed = reorder(group, id, dir);
+		const changed = reorder(group, id, dir, stamp());
 		if (!changed.length) return;
 		await this.db.putMany('goals', changed);
 		const by = new Map(changed.map((g) => [g.id, g]));
@@ -711,7 +735,7 @@ class Ledger {
 	async setGoalArchived(id: number, archived: boolean) {
 		const cur = this.goals.find((g) => g.id === id);
 		if (!cur) throw new LedgerError('A cél nem található');
-		const next = { ...cur, archived };
+		const next = { ...cur, archived, updatedAt: stamp() };
 		await this.db.put('goals', next);
 		this.goals = this.goals.map((g) => (g.id === id ? next : g));
 		this.notify();
@@ -726,7 +750,8 @@ class Ledger {
 	// --- mentett szűrők ---
 
 	async addFilter(name: string, query: string): Promise<SavedFilter> {
-		const row = await this.db.add<SavedFilter>('filters', { name, query, createdAt: stamp() });
+		const now = stamp();
+		const row = await this.db.add<SavedFilter>('filters', { name, query, createdAt: now, updatedAt: now });
 		this.filters = [...this.filters, row];
 		this.notify();
 		return row;
@@ -746,8 +771,10 @@ class Ledger {
 			throw new LedgerError('A keret pozitív összeg legyen');
 		}
 		const next = { ...this.prefs, totalBudget: budget };
-		await this.db.setMeta('prefs', next);
+		const at = stamp();
+		await this.db.setPrefs(next, at);
 		this.prefs = next;
+		this.prefsUpdatedAt = at;
 		this.notify();
 	}
 
@@ -850,9 +877,14 @@ export function stripAmountParams(query: string): string {
 
 /**
  * Egy csoport (már rendezett lista) egyik elemét egy hellyel arrébb teszi, és a teljes csoportot
- * 1..n sorszámra igazítja. Visszaadja a ténylegesen megváltozott sorokat.
+ * 1..n sorszámra igazítja. Visszaadja a ténylegesen megváltozott sorokat (ha van `updatedAt`, azzal bélyegezve).
  */
-export function reorder<T extends { id: number; sortOrder: number }>(group: T[], id: number, dir: -1 | 1): T[] {
+export function reorder<T extends { id: number; sortOrder: number }>(
+	group: T[],
+	id: number,
+	dir: -1 | 1,
+	updatedAt?: number
+): T[] {
 	const i = group.findIndex((x) => x.id === id);
 	const j = i + dir;
 	if (i < 0 || j < 0 || j >= group.length) return [];
@@ -860,7 +892,7 @@ export function reorder<T extends { id: number; sortOrder: number }>(group: T[],
 	[list[i], list[j]] = [list[j], list[i]];
 	const changed: T[] = [];
 	list.forEach((x, idx) => {
-		if (x.sortOrder !== idx + 1) changed.push({ ...x, sortOrder: idx + 1 });
+		if (x.sortOrder !== idx + 1) changed.push({ ...x, sortOrder: idx + 1, ...(updatedAt !== undefined ? { updatedAt } : {}) });
 	});
 	return changed;
 }

@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 import { describe, expect, it } from 'vitest';
-import { DATA_STORES, DB_VERSION, inferAccountType, openLedgerDb } from '../src/lib/db/idb';
+import { DATA_STORES, DB_VERSION, inferAccountType, openLedgerDb, upgradeSchema } from '../src/lib/db/idb';
 import { LedgerRepo } from '../src/lib/db/repo';
 
 let n = 0;
@@ -104,5 +104,46 @@ describe('IndexedDB-migráció', () => {
 		expect(db.version).toBe(DB_VERSION);
 		expect(db.objectStoreNames.contains('recurring')).toBe(true);
 		db.close();
+	});
+
+	it('a 2. verziós adatbázis a 3.-ra frissül: minden rekordtípus updatedAt-et kap (= createdAt), a meglévőt nem bántja', async () => {
+		const dbName = name();
+		const v2 = await new Promise<IDBDatabase>((resolve, reject) => {
+			const req = indexedDB.open(dbName, 2);
+			req.onupgradeneeded = (e) => upgradeSchema(req.result, req.transaction!, e.oldVersion, 2);
+			req.onsuccess = () => resolve(req.result);
+			req.onerror = () => reject(req.error);
+		});
+		await put(v2, 'accounts', { id: 1, name: 'Készpénz', type: 'cash', initialBalance: 0, archived: false, sortOrder: 1, createdAt: 11 });
+		await put(v2, 'categories', { id: 1, name: 'Étel', type: 'expense', color: '#f97316', icon: '', monthlyBudget: null, archived: false, sortOrder: 1, createdAt: 12 });
+		await put(v2, 'transactions', { id: 1, type: 'expense', amount: 890, date: '2026-09-28', description: 'Kávé', categoryId: 1, accountId: 1, toAccountId: null, note: '', tags: [], createdAt: 13, updatedAt: 99 });
+		await put(v2, 'recurring', { id: 1, type: 'expense', amount: 1, description: 'x', categoryId: 1, accountId: 1, toAccountId: null, note: '', tags: [], frequency: 'weekly', interval: 1, startDate: '2026-09-07', endDate: null, lastHandled: null, active: true, createdAt: 14 });
+		await put(v2, 'templates', { id: 1, name: 'Kávé', type: 'expense', amount: null, description: '', categoryId: 1, accountId: 1, toAccountId: null, note: '', tags: [], sortOrder: 1, createdAt: 15 });
+		await put(v2, 'goals', { id: 1, name: 'Laptop', icon: '', color: '#000000', target: 5, saved: 0, accountId: null, deadline: null, archived: false, sortOrder: 1, createdAt: 16 });
+		await put(v2, 'filters', { id: 1, name: 'f', query: 'q=a', createdAt: 17 });
+		await put(v2, 'meta', { key: 'prefs', value: { currency: 'EUR', totalBudget: null } });
+		v2.close();
+
+		const repo = new LedgerRepo(await openLedgerDb(dbName));
+		const d = await repo.loadAll();
+		expect(d.accounts[0].updatedAt).toBe(11);
+		expect(d.categories[0].updatedAt).toBe(12);
+		expect(d.transactions[0].updatedAt).toBe(99); // a tranzakcióké érintetlen
+		expect(d.recurring[0].updatedAt).toBe(14);
+		expect(d.templates[0].updatedAt).toBe(15);
+		expect(d.goals[0].updatedAt).toBe(16);
+		expect(d.filters[0].updatedAt).toBe(17);
+		// A régi beállításoknak nincs módosítási idejük: 0, így minden valódi módosítás újabb.
+		expect(await repo.getPrefs()).toEqual({ prefs: { currency: 'EUR', totalBudget: null }, updatedAt: 0 });
+		repo.close();
+	});
+
+	it('a beállítások módosítási ideje a meta.prefs értékében tárolódik', async () => {
+		const repo = new LedgerRepo(await openLedgerDb(name()));
+		expect((await repo.getPrefs()).updatedAt).toBe(0);
+		await repo.setPrefs({ currency: 'HUF', totalBudget: 5000 }, 1234);
+		expect(await repo.getPrefs()).toEqual({ prefs: { currency: 'HUF', totalBudget: 5000 }, updatedAt: 1234 });
+		expect(await repo.getMeta('prefs')).toEqual({ currency: 'HUF', totalBudget: 5000, updatedAt: 1234 });
+		repo.close();
 	});
 });

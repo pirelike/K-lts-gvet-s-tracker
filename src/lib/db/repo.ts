@@ -2,8 +2,9 @@
  * Az adatbázis-réteg: egyszerű CRUD az IndexedDB fölött. Nem tud Svelte-ről – így Node alatt
  * (fake-indexeddb-vel) is tesztelhető.
  */
-import type { Account, LedgerSnapshot, Prefs, Recurring, Transaction } from '../types';
+import { DEFAULT_PREFS, type Account, type LedgerSnapshot, type Prefs, type Recurring, type Transaction } from '../types';
 import { newId, recurringTxId } from '../sync/ids';
+import { stamp } from '../sync/stamp';
 import { DEFAULT_ACCOUNTS, DEFAULT_CATEGORIES } from './defaults';
 import { ALL_STORES, DATA_STORES, done, inferAccountType, wrap, type DataStore } from './idb';
 
@@ -127,6 +128,18 @@ export class LedgerRepo {
 		await done(tx);
 	}
 
+	/** A beállítások a módosítás idejével (a szinkronhoz); a `meta.prefs` értéke a kettő együtt. */
+	async getPrefs(): Promise<{ prefs: Prefs; updatedAt: number }> {
+		const stored = await this.getMeta<Prefs & { updatedAt?: number }>('prefs');
+		if (!stored) return { prefs: DEFAULT_PREFS, updatedAt: 0 };
+		const { updatedAt, ...prefs } = stored;
+		return { prefs: { ...DEFAULT_PREFS, ...prefs }, updatedAt: typeof updatedAt === 'number' ? updatedAt : 0 };
+	}
+
+	async setPrefs(prefs: Prefs, updatedAt: number): Promise<void> {
+		await this.setMeta('prefs', { ...prefs, updatedAt });
+	}
+
 	/** Első indításkor létrehozza az alap kategóriákat és számlákat (egyszer, egy tranzakcióban). */
 	async seedDefaultsIfNeeded(): Promise<boolean> {
 		const tx = this.db.transaction(['accounts', 'categories', 'meta'], 'readwrite');
@@ -138,8 +151,9 @@ export class LedgerRepo {
 		}
 		const now = Date.now();
 		// Fix azonosítók: két friss eszközön ugyanazok az alapelemek jönnek létre (lásd `defaults.ts`).
-		DEFAULT_ACCOUNTS.forEach((a, i) => tx.objectStore('accounts').put({ ...a, createdAt: now + i }));
-		DEFAULT_CATEGORIES.forEach((c, i) => tx.objectStore('categories').put({ ...c, createdAt: now + i }));
+		// Az `updatedAt` 0, így bármilyen valódi módosítás felülírja az alapértéket összefésüléskor.
+		DEFAULT_ACCOUNTS.forEach((a, i) => tx.objectStore('accounts').put({ ...a, createdAt: now + i, updatedAt: 0 }));
+		DEFAULT_CATEGORIES.forEach((c, i) => tx.objectStore('categories').put({ ...c, createdAt: now + i, updatedAt: 0 }));
 		meta.put({ key: 'initialized', value: true });
 		await done(tx);
 		return true;
@@ -167,7 +181,7 @@ export class LedgerRepo {
 			await done(t);
 			return null;
 		}
-		const rule: Recurring = { ...cur, lastHandled: handledDate };
+		const rule: Recurring = { ...cur, lastHandled: handledDate, updatedAt: stamp() };
 		rules.put(plain(rule));
 		let added: Transaction | null = null;
 		if (row) {
@@ -182,14 +196,14 @@ export class LedgerRepo {
 	 * Teljes csere (biztonsági mentés visszatöltése, pénznemváltás): egyetlen tranzakcióban,
 	 * mindent vagy semmit. A `prefs` a meta store-ba kerül.
 	 */
-	async replaceAll(data: LedgerData, prefs?: Prefs): Promise<void> {
+	async replaceAll(data: LedgerData, prefs?: Prefs, prefsUpdatedAt: number = stamp()): Promise<void> {
 		const tx = this.db.transaction([...DATA_STORES, 'meta'], 'readwrite');
 		for (const s of DATA_STORES) {
 			const os = tx.objectStore(s);
 			os.clear();
 			for (const row of data[s] as Row[]) os.put(plain(row));
 		}
-		if (prefs) tx.objectStore('meta').put({ key: 'prefs', value: plain(prefs) });
+		if (prefs) tx.objectStore('meta').put({ key: 'prefs', value: { ...plain(prefs), updatedAt: prefsUpdatedAt } });
 		await done(tx);
 	}
 

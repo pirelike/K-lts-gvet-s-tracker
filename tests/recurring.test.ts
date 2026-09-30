@@ -5,7 +5,7 @@ import type { Recurring } from '../src/lib/types';
 const rule = (over: Partial<Recurring> = {}): Recurring => ({
 	id: 1, type: 'expense', amount: 90000, description: 'Albérlet', categoryId: 1, accountId: 1, toAccountId: null,
 	note: '', tags: [], frequency: 'monthly', interval: 1, startDate: '2026-01-05', endDate: null,
-	lastHandled: null, active: true, createdAt: 1, ...over
+	lastHandled: null, active: true, createdAt: 1, updatedAt: 1, ...over
 });
 
 describe('ismétlődő tételek', () => {

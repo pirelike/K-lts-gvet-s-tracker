@@ -1,8 +1,8 @@
 import type { Account, Category } from '../types';
 
 /** Az alapelemek azonosítója fix: két friss eszköz ugyanazokat hozza létre, szinkron után sincs duplikátum. */
-type NewCategory = Omit<Category, 'createdAt'>;
-type NewAccount = Omit<Account, 'createdAt'>;
+type NewCategory = Omit<Category, 'createdAt' | 'updatedAt'>;
+type NewAccount = Omit<Account, 'createdAt' | 'updatedAt'>;
 
 /** Az alap kategóriák azonosítói ettől indulnak (a számlák 1-től); a felhasználói elemeké `>= 2^32`. */
 export const DEFAULT_CATEGORY_ID_BASE = 101;
