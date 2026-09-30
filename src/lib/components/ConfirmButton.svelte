@@ -5,13 +5,15 @@
 		confirmLabel = 'Igen, törlöm',
 		question = 'Biztosan?',
 		small = true,
+		disabled = false,
 		onconfirm
 	}: {
 		label: string;
 		confirmLabel?: string;
 		question?: string;
 		small?: boolean;
-		onconfirm: () => void | Promise<void>;
+		disabled?: boolean;
+		onconfirm: () => unknown;
 	} = $props();
 
 	let armed = $state(false);
@@ -28,7 +30,7 @@
 	}
 </script>
 
-{#if armed}
+{#if armed && !disabled}
 	<span class="row wrap">
 		<span class="small">{question}</span>
 		<button
@@ -43,5 +45,5 @@
 		<button type="button" class="btn" class:small onclick={cancel}>Mégse</button>
 	</span>
 {:else}
-	<button type="button" class="btn danger" class:small onclick={arm}>{label}</button>
+	<button type="button" class="btn danger" class:small {disabled} onclick={arm}>{label}</button>
 {/if}

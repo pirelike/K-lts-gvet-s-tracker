@@ -426,12 +426,16 @@ export function validateGoal(v: GoalFormValues, all: Goal[], editingId?: number)
 	else if (all.some((g) => g.id !== editingId && fold(g.name) === fold(name))) errors.name = 'Már van ilyen nevű cél';
 	const target = parseAmount(v.target);
 	if (!target.ok) errors.target = target.error;
+	// Számlához kötött célnál az „Eddig félretéve" mező el van rejtve, ezért ott nem lehet hibát okozni vele.
+	const trackedByAccount = v.accountId !== null;
 	let saved = 0;
 	if (v.saved.trim()) {
 		const s = evaluateExpression(v.saved);
-		if (!s.ok) errors.saved = s.error;
-		else if (s.value < 0) errors.saved = 'Az összeg nem lehet negatív';
-		else saved = s.value;
+		if (!s.ok) {
+			if (!trackedByAccount) errors.saved = s.error;
+		} else if (s.value < 0) {
+			if (!trackedByAccount) errors.saved = 'Az összeg nem lehet negatív';
+		} else saved = s.value;
 	}
 	let deadline: string | null = null;
 	if (v.deadline.trim()) {

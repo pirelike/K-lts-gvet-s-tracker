@@ -207,17 +207,21 @@
 	}
 
 	// --- emlékeztetők ---
-	const perm = $derived(notificationPermission());
+	// Állapot, nem $derived: a böngésző engedélye nem reaktív, ezért a kérés után kézzel frissítjük.
+	let perm = $state(notificationPermission());
 	async function saveReminders(next: ReminderSettings) {
 		await auth.setReminders(next);
 		void syncPeriodicReminder(next.enabled && !!next.dailyTime);
 	}
 	async function toggleReminders(e: Event & { currentTarget: HTMLInputElement }) {
-		const on = e.currentTarget.checked;
+		// Az `await` után az esemény `currentTarget`-je már null, ezért előre eltesszük.
+		const input = e.currentTarget;
+		const on = input.checked;
 		if (on) {
 			const p = await requestNotificationPermission();
+			perm = notificationPermission();
 			if (p !== 'granted') {
-				e.currentTarget.checked = false;
+				input.checked = false;
 				toasts.error(p === 'unsupported' ? 'Ez a böngésző nem támogatja az értesítéseket' : 'Az értesítések le vannak tiltva – engedélyezd a böngésző beállításaiban');
 				return;
 			}
@@ -296,12 +300,12 @@
 			· Tartós tárhely:
 			<strong>{auth.persisted === null ? 'ismeretlen' : auth.persisted ? 'igen' : 'nem (a böngésző szükség esetén törölheti)'}</strong>
 		</p>
-		<div class="row wrap">
+		<div class="actions">
 			<button class="btn primary" type="button" onclick={exportBackup}>Mentés letöltése (JSON)</button>
 			{#if canShare}
 				<button class="btn" type="button" onclick={shareBackup}>Mentés küldése…</button>
 			{/if}
-			<button class="btn" type="button" aria-expanded={encOpen} onclick={() => (encOpen = !encOpen)}>Jelszóval védett mentés…</button>
+			<button class="btn" type="button" aria-expanded={encOpen} onclick={() => ((encOpen = !encOpen), (encMsg = ""))}>Jelszóval védett mentés…</button>
 			<button class="btn" type="button" onclick={() => fileInput.click()}>Mentés visszatöltése…</button>
 			<input bind:this={fileInput} type="file" accept="application/json,.json" onchange={onFile} class="sr-only" tabindex="-1" aria-label="Mentésfájl kiválasztása" />
 		</div>
@@ -323,7 +327,7 @@
 				<p class="hint">
 					A fájl AES-256-GCM-mel titkosított, a kulcsot a jelszóból képezzük (PBKDF2). <strong>A jelszót nem tárolja senki:</strong> ha elfelejted, a mentés nem nyitható meg.
 				</p>
-				<div class="row wrap">
+				<div class="actions">
 					<button class="btn primary" type="button" disabled={encBusy} onclick={() => encrypted('download')}>Titkosított mentés letöltése</button>
 					{#if canShare}<button class="btn" type="button" disabled={encBusy} onclick={() => encrypted('share')}>Titkosított mentés küldése…</button>{/if}
 				</div>
@@ -362,7 +366,7 @@
 	<section class="card stack" aria-labelledby="sec-csv">
 		<h2 id="sec-csv">CSV-export és -import (Excel)</h2>
 		<p class="muted">A tételek táblázatként Excelbe (pontosvesszős, UTF-8 CSV). Az import párja a <a href={href('/import')}>CSV-import</a> oldal.</p>
-		<div class="row wrap">
+		<div class="actions">
 			<select bind:value={scope} aria-label="Exportálandó időszak" style="width:auto">
 				<option value="all">Minden tétel</option>
 				<option value="month">Ez a hónap</option>
@@ -389,23 +393,24 @@
 		</div>
 		<div class="field">
 			<label for="cur-rate">Árfolyam: 1 {quoted.unit.code} = ? {quoted.per.code}</label>
-			<input id="cur-rate" type="text" inputmode="decimal" autocomplete="off" placeholder={quoted.per.code === 'HUF' ? 'pl. 395' : 'pl. 1,08'} bind:value={rateText} />
+			<input id="cur-rate" type="text" inputmode="decimal" autocomplete="off" placeholder={quoted.per.code === 'HUF' ? 'pl. 395' : 'pl. 1,08'} bind:value={rateText}
+				aria-invalid={rateText.trim() && !rate ? 'true' : undefined} aria-describedby={rateText.trim() && !rate ? 'cur-rate-err' : undefined} />
+			{#if rateText.trim() && !rate}<p class="error" id="cur-rate-err" role="alert">Az árfolyam pozitív szám legyen (pl. 395 vagy 1,08).</p>{/if}
 			{#if sample !== null}
 				<p class="hint">Például: {formatMoney(1000 * scaleOf(cur))} → <strong>{(() => { const f = findCurrency(target.code)!; return `${new Intl.NumberFormat('hu-HU', { minimumFractionDigits: f.decimals, maximumFractionDigits: f.decimals }).format(sample / scaleOf(f))} ${f.symbol}`; })()}</strong></p>
 			{/if}
 		</div>
-		<label class="row"><input type="checkbox" bind:checked={backupFirst} /> Mentés letöltése az átváltás előtt (ajánlott)</label>
+		<label class="check"><input type="checkbox" bind:checked={backupFirst} /> Mentés letöltése az átváltás előtt (ajánlott)</label>
 		<div>
 			<ConfirmButton
 				label="Pénznem átváltása"
 				question={`Minden összeg átszámolódik (${cur.code} → ${target.code}).`}
 				confirmLabel="Igen, átváltom"
 				small={false}
-				onconfirm={async () => {
-					if (rate && !switchBusy) await switchCurrency();
-					else toasts.error('Add meg az árfolyamot');
-				}}
+				disabled={!rate || switchBusy}
+				onconfirm={switchCurrency}
 			/>
+			{#if !rate}<p class="hint" style="margin-top:6px">Az átváltáshoz add meg az árfolyamot.</p>{/if}
 		</div>
 	</section>
 
@@ -414,7 +419,7 @@
 		{#if perm === 'unsupported'}
 			<p class="muted">Ez a böngésző nem támogatja az értesítéseket.</p>
 		{:else}
-			<label class="row">
+			<label class="check">
 				<input type="checkbox" checked={auth.reminders.enabled} onchange={toggleReminders} /> Emlékeztető-értesítések bekapcsolása
 			</label>
 			{#if perm === 'denied'}<p class="error">Az értesítések le vannak tiltva a böngészőben; engedélyezd az oldal beállításaiban.</p>{/if}
@@ -424,9 +429,9 @@
 					<input id="daily-time" type="time" value={auth.reminders.dailyTime ?? ''} onchange={(e) => saveReminders({ ...auth.reminders, dailyTime: e.currentTarget.value || null })} />
 					<p class="hint">„Ne felejtsd rögzíteni a mai kiadásaidat" – ha aznap még nincs tételed.</p>
 				</div>
-				<label class="row"><input type="checkbox" checked={auth.reminders.due} onchange={(e) => saveReminders({ ...auth.reminders, due: e.currentTarget.checked })} /> Esedékes ismétlődő tételek</label>
-				<label class="row"><input type="checkbox" checked={auth.reminders.budget} onchange={(e) => saveReminders({ ...auth.reminders, budget: e.currentTarget.checked })} /> Havi keret 80% / 100% átlépése</label>
-				<label class="row"><input type="checkbox" checked={auth.reminders.backup} onchange={(e) => saveReminders({ ...auth.reminders, backup: e.currentTarget.checked })} /> Régen volt biztonsági mentés</label>
+				<label class="check"><input type="checkbox" checked={auth.reminders.due} onchange={(e) => saveReminders({ ...auth.reminders, due: e.currentTarget.checked })} /> Esedékes ismétlődő tételek</label>
+				<label class="check"><input type="checkbox" checked={auth.reminders.budget} onchange={(e) => saveReminders({ ...auth.reminders, budget: e.currentTarget.checked })} /> Havi keret 80% / 100% átlépése</label>
+				<label class="check"><input type="checkbox" checked={auth.reminders.backup} onchange={(e) => saveReminders({ ...auth.reminders, backup: e.currentTarget.checked })} /> Régen volt biztonsági mentés</label>
 				<div><button class="btn small" type="button" onclick={testNotification}>Próba értesítés</button></div>
 			{/if}
 			<p class="hint">
