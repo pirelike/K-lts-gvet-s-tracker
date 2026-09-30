@@ -94,7 +94,20 @@ class Ledger {
 		return this.repo;
 	}
 
+	/**
+	 * Minden helyi módosítás után hívódik (a szinkronmotor ebből tudja, hogy van feltöltetlen változás).
+	 * A `reloadFromDb` nem hívja: a szinkron saját átvétele nem számít helyi módosításnak.
+	 */
+	onChange: (() => void) | null = null;
+
 	private notify() {
+		this.channel?.postMessage('changed');
+		this.onChange?.();
+	}
+
+	/** Az adatbázis tartalmának újratöltése, ha azt a szinkron írta át; a többi lapot is értesíti. */
+	async reloadFromDb() {
+		await this.load();
 		this.channel?.postMessage('changed');
 	}
 

@@ -467,3 +467,32 @@ után döntöttem el; a tervezett viselkedés (ütközésmentes id-k, LWW, jelö
   Jelszócsere után a régi kulcs sója eltér a fájlétól, ezért azonnal „Hibás szinkronjelszó" a válasz, a
   visszafejtési kísérlet nélkül.
 - Az iterációszám felső korlátja (5 000 000) a `crypto.ts`-ben közös konstans lett (`MAX_KDF_ITERATIONS`).
+
+### 6. fázis (`provider.ts`, `memory.ts`, `core.ts`, `engine.svelte.ts`)
+
+- **Két réteg: `core.ts` és `engine.svelte.ts`.** Egyetlen szinkronfutás (`syncOnce`: letöltés → összefésülés →
+  validálás → helyi csere → feltöltés) a Svelte- és időzítés-mentes `core.ts`-ben van, így két `LedgerRepo`
+  között is tesztelhető. A motor (`SyncEngine`) az ütemezést, a zárat, az állapotot és a csatlakozást adja.
+  A motor nem importálja az `auth`-ot és a `ledger`-t (import-ciklus lenne): az `auth.init` köti be a
+  `SyncHost` felületen át (`repo`, `reload`, `unlocked`, `onSynced`, `onEvent`), és a `ledger.onChange` horoggal.
+- **A helyi csere védett** (`LedgerRepo.replaceAllGuarded`): ugyanabban az IndexedDB-tranzakcióban ellenőrzi, hogy
+  a helyi adat még az, amiből az összefésülés készült. A terv ezt nem mondta ki, de enélkül a szinkron
+  hálózati ideje alatt (másodpercek) végzett szerkesztés elveszne. Eltérés esetén a futás újrakezdődik
+  (legfeljebb háromszor, a felhő-`conflict`-tal közös számlálóval).
+- **`SyncProvider.removeFile()`** új metódus a „Felhőben tárolt adatok törlése" gombhoz (a terv felületén nem
+  szerepelt). A tokenek tárolására `ProviderStorage` került, amit a motor a `meta.sync.tokens` mezőre képez le.
+- **Az `epoch`-vesztés mentése tartós:** eltérő korszaknál a helyi oldal felülírása előtt a helyi adatok JSON-
+  mentése a `meta.lostBackup` alá kerül (és a `sync.lostBackup` állapotba), amíg a felhasználó le nem tölti
+  vagy el nem veti. A terv „felajánljuk, hogy előtte letölti" szövegét így oldottam meg: háttérszinkron
+  közben nem ugorhat fel modális ablak, és az automatikus letöltést a böngésző blokkolhatja.
+- **Első csatlakozás** (`applyFirstConnect`): az átvétel/összefésülés a helyi adatra történik (védetten), a
+  feltöltést a rákövetkező `syncOnce` végzi el. A `completeConnect` rossz jelszónál semmit nem ment el.
+- **`writeKey` a `syncOnce`-ban:** jelszócserénél a letöltött fájlt még a régi kulccsal nyitjuk, és az újjal írjuk.
+- **A szinkron órája `stamp()`** (nem `Date.now()`): az utolsó szinkron ideje így pontosan elválasztja a
+  korábbi és a későbbi módosításokat (az `epochLost` számolásához).
+- **Időzítők injektálhatók** (`Timers`), hogy az ütemezés (debounce, visszalépés) kézzel léptethető órával
+  tesztelhető legyen; a fake-indexeddb saját időzítőit így nem zavarja semmi.
+- **Memória-szolgáltató:** a terv `localStorage`-t ír. Az két elszigetelt böngészőkontextus (két „eszköz") között
+  nem közös, ezért a `MemoryBackend` cserélhető: alapból `localStorage`, de az e2e-teszt a
+  `window.__syncMemoryBackend` horgonyon át Node-oldali, közös tárat köt be.
+- **Az e2e (`e2e/sync.mjs`) a 7. fázisban készül**, mert a csatlakozás végigkattintásához a felület kell.

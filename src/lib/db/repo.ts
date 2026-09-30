@@ -32,20 +32,15 @@ export class LedgerRepo {
 	}
 
 	async loadAll(): Promise<LedgerData> {
-		const tx = this.db.transaction(DATA_STORES, 'readonly');
-		const data = emptyData() as Record<DataStore, unknown[]>;
-		await Promise.all(
-			DATA_STORES.map(async (s) => {
-				// Az azonosítók véletlenek, a tároló mégis kulcs szerint adja vissza a sorokat: létrehozási
-				// sorrendbe (createdAt, azon belül id) rendezzük, mint amikor az autoIncrement id még időrendet adott.
-				const rows = (await wrap(tx.objectStore(s).getAll())) as { id: number; createdAt?: number }[];
-				data[s] = rows.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0) || a.id - b.id);
-			})
-		);
-		const out = data as unknown as LedgerData;
-		// Védőháló: a migráció után is legyen típusa minden számlának (pl. kézzel módosított adatbázis).
-		out.accounts = out.accounts.map((a: Account) => (a.type ? a : { ...a, type: inferAccountType(a.name) }));
-		return out;
+		return loadAllIn(this.db.transaction(DATA_STORES, 'readonly'));
+	}
+
+	/**
+	 * Az összes adat, a beállítások, a korszak és a törlési jelölők egyetlen olvasó tranzakcióból, tehát
+	 * összhangban (a szinkron ebből dolgozik).
+	 */
+	async readSnapshot(): Promise<RepoSnapshot> {
+		return snapshotIn(this.db.transaction([...DATA_STORES, 'meta'], 'readonly'));
 	}
 
 	/**
@@ -143,6 +138,12 @@ export class LedgerRepo {
 		await done(tx);
 	}
 
+	async deleteMeta(key: string): Promise<void> {
+		const tx = this.db.transaction('meta', 'readwrite');
+		tx.objectStore('meta').delete(key);
+		await done(tx);
+	}
+
 	/**
 	 * Mint a `setMeta`, de a JSON-kerülő nélkül, az IndexedDB saját (structured clone) másolásával. Kell
 	 * a `CryptoKey`-hez (szinkronkulcs), amit a JSON-kerülő értéktelen `{}`-vá tenne.
@@ -184,10 +185,13 @@ export class LedgerRepo {
 		return epoch;
 	}
 
-	/** Ha még nincs korszak (első csatlakozás előtt), létrehoz egyet; a meglévőt visszaadja. */
+	/** Ha még nincs korszak (első csatlakozás előtt), létrehoz egyet (a jelölőket nem bántja); a meglévőt visszaadja. */
 	async ensureEpoch(): Promise<SyncEpoch> {
 		const { epoch } = await this.getSyncMeta();
-		return epoch ?? this.startEpoch();
+		if (epoch) return epoch;
+		const fresh = newEpoch();
+		await this.setMeta('syncEpoch', fresh);
+		return fresh;
 	}
 
 	/** Első indításkor létrehozza az alap kategóriákat és számlákat (egyszer, egy tranzakcióban). */
@@ -257,16 +261,33 @@ export class LedgerRepo {
 		sync?: { epoch: SyncEpoch; tombstones: Tombstones }
 	): Promise<void> {
 		const tx = this.db.transaction([...DATA_STORES, 'meta'], 'readwrite');
-		for (const s of DATA_STORES) {
-			const os = tx.objectStore(s);
-			os.clear();
-			for (const row of data[s] as Row[]) os.put(plain(row));
-		}
-		const meta = tx.objectStore('meta');
-		if (prefs) meta.put({ key: 'prefs', value: { ...plain(prefs), updatedAt: prefsUpdatedAt } });
-		meta.put({ key: 'syncEpoch', value: sync?.epoch ?? newEpoch() });
-		meta.put({ key: 'tombstones', value: sync ? plain(sync.tombstones) : {} });
+		writeAll(tx, data, prefs, prefsUpdatedAt, sync ?? { epoch: newEpoch(), tombstones: {} });
 		await done(tx);
+	}
+
+	/**
+	 * A szinkron eredményének átvétele védetten: ugyanabban a tranzakcióban ellenőrzi, hogy a helyi állapot
+	 * még pontosan az, amiből az összefésülés készült (`fingerprint(snapshot) === expected`). Ha közben a
+	 * felhasználó módosított valamit, nem ír semmit, és `false`-t ad: a módosítás nem veszhet el, a szinkron
+	 * újrapróbálja. Egyébként a `replaceAll`-lal azonos módon ír.
+	 */
+	async replaceAllGuarded(
+		guard: { expected: string; fingerprint: (s: RepoSnapshot) => string },
+		data: LedgerData,
+		prefs: Prefs,
+		prefsUpdatedAt: number,
+		sync: { epoch: SyncEpoch; tombstones: Tombstones }
+	): Promise<boolean> {
+		const tx = this.db.transaction([...DATA_STORES, 'meta'], 'readwrite');
+		const current = await snapshotIn(tx);
+		if (guard.fingerprint(current) !== guard.expected) {
+			tx.abort();
+			await done(tx).catch(() => {});
+			return false;
+		}
+		writeAll(tx, data, prefs, prefsUpdatedAt, sync);
+		await done(tx);
+		return true;
 	}
 
 	/** Minden adat és beállítás törlése (a PIN-t is). */
@@ -275,6 +296,69 @@ export class LedgerRepo {
 		for (const s of ALL_STORES) tx.objectStore(s).clear();
 		await done(tx);
 	}
+}
+
+/** A repóból egy tranzakcióban kiolvasott, összhangban lévő állapot. */
+export interface RepoSnapshot {
+	data: LedgerData;
+	prefs: Prefs;
+	prefsUpdatedAt: number;
+	/** Még nincs, ha az eszköz sosem csatlakozott szinkronhoz. */
+	epoch: SyncEpoch | null;
+	tombstones: Tombstones;
+}
+
+async function loadAllIn(tx: IDBTransaction): Promise<LedgerData> {
+	const data = emptyData() as Record<DataStore, unknown[]>;
+	await Promise.all(
+		DATA_STORES.map(async (s) => {
+			// Az azonosítók véletlenek, a tároló mégis kulcs szerint adja vissza a sorokat: létrehozási
+			// sorrendbe (createdAt, azon belül id) rendezzük, mint amikor az autoIncrement id még időrendet adott.
+			const rows = (await wrap(tx.objectStore(s).getAll())) as { id: number; createdAt?: number }[];
+			data[s] = rows.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0) || a.id - b.id);
+		})
+	);
+	const out = data as unknown as LedgerData;
+	// Védőháló: a migráció után is legyen típusa minden számlának (pl. kézzel módosított adatbázis).
+	out.accounts = out.accounts.map((a: Account) => (a.type ? a : { ...a, type: inferAccountType(a.name) }));
+	return out;
+}
+
+async function snapshotIn(tx: IDBTransaction): Promise<RepoSnapshot> {
+	const meta = tx.objectStore('meta');
+	const [data, storedPrefs, epoch, tombstones] = await Promise.all([
+		loadAllIn(tx),
+		wrap(meta.get('prefs')) as Promise<{ value?: Prefs & { updatedAt?: number } } | undefined>,
+		readEpoch(meta),
+		readTombstones(meta)
+	]);
+	const { updatedAt, ...prefs } = storedPrefs?.value ?? ({} as Prefs & { updatedAt?: number });
+	return {
+		data,
+		prefs: { ...DEFAULT_PREFS, ...prefs },
+		prefsUpdatedAt: typeof updatedAt === 'number' ? updatedAt : 0,
+		epoch,
+		tombstones
+	};
+}
+
+/** A teljes cserét végző írások (a hívó nyitja a tranzakciót, és várja meg a végét). */
+function writeAll(
+	tx: IDBTransaction,
+	data: LedgerData,
+	prefs: Prefs | undefined,
+	prefsUpdatedAt: number,
+	sync: { epoch: SyncEpoch; tombstones: Tombstones }
+) {
+	for (const s of DATA_STORES) {
+		const os = tx.objectStore(s);
+		os.clear();
+		for (const row of data[s] as Row[]) os.put(plain(row));
+	}
+	const meta = tx.objectStore('meta');
+	if (prefs) meta.put({ key: 'prefs', value: { ...plain(prefs), updatedAt: prefsUpdatedAt } });
+	meta.put({ key: 'syncEpoch', value: sync.epoch });
+	meta.put({ key: 'tombstones', value: plain(sync.tombstones) });
 }
 
 async function readTombstones(meta: IDBObjectStore): Promise<Tombstones> {

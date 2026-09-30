@@ -71,15 +71,15 @@ export function stableStringify(v: unknown): string {
 
 const byCreated = (a: Row, b: Row) => a.createdAt - b.createdAt || a.id - b.id;
 
-/** Kanonikus alak az összehasonlításhoz: rendezett tárolók, rendezett kulcsok. */
-function canonical(s: SyncState): string {
+/** Kanonikus alak (ujjlenyomat) az összehasonlításhoz: rendezett tárolók, rendezett kulcsok. */
+export function stateFingerprint(s: SyncState): string {
 	const data: Record<string, Row[]> = {};
 	for (const st of DATA_STORES) data[st] = [...rowsOf(s.data, st)].sort(byCreated);
 	return stableStringify({ epoch: s.epoch, prefs: s.prefs, prefsUpdatedAt: s.prefsUpdatedAt, data, tombstones: s.tombstones });
 }
 
 /** Két állapot azonos-e (kulcssorrendtől és a sorok sorrendjétől függetlenül). */
-export const sameState = (a: SyncState, b: SyncState): boolean => canonical(a) === canonical(b);
+export const sameState = (a: SyncState, b: SyncState): boolean => stateFingerprint(a) === stateFingerprint(b);
 
 const maxDate = (a: string | null, b: string | null): string | null => (a === null ? b : b === null ? a : a > b ? a : b);
 
