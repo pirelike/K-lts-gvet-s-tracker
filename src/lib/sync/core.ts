@@ -147,6 +147,8 @@ export async function syncOnce(input: SyncRunInput): Promise<SyncOutcome> {
 
 			let remoteState: SyncState | null = null;
 			let remoteEncrypted = writeKey !== null;
+			// Két eszköz egyszerre létrehozott fájlja: az elsőt (a legrégebbit) tartjuk meg, a többit összefésüljük bele.
+			const mergedCopies: string[] = [];
 			if (remoteFile) {
 				const dec = await decodeSyncFile(remoteFile.text, key);
 				if (!dec.ok) {
@@ -155,6 +157,12 @@ export async function syncOnce(input: SyncRunInput): Promise<SyncOutcome> {
 				}
 				remoteState = { ...dec.state, tombstones: pruneTombstones(dec.state.tombstones, now()) };
 				remoteEncrypted = dec.encrypted;
+				for (const copy of remoteFile.extra ?? []) {
+					const extra = await decodeSyncFile(copy.text, key);
+					if (!extra.ok) continue; // amit nem tudunk beolvasni, azt nem is töröljük
+					remoteState = mergeStates(remoteState, { ...extra.state, tombstones: pruneTombstones(extra.state.tombstones, now()) }).state;
+					mergedCopies.push(copy.ref);
+				}
 			}
 
 			// A régi jelölők eldobása (a törlés így 180 nap után „elfelejtődik").
@@ -175,13 +183,16 @@ export async function syncOnce(input: SyncRunInput): Promise<SyncOutcome> {
 			}
 			report = addReports(report, merged.report);
 
-			const upload = merged.remoteChanged || !remoteFile || input.forceUpload === true || remoteEncrypted !== (writeKey !== null);
+			const upload =
+				merged.remoteChanged || !remoteFile || input.forceUpload === true || remoteEncrypted !== (writeKey !== null) || mergedCopies.length > 0;
 			let rev = remoteFile?.rev ?? null;
 			if (upload) {
 				const text = await encodeSyncFile(merged.state, { key: writeKey, deviceId, writtenAt: now() });
 				const w = await provider.write(text, remoteFile?.rev ?? null);
 				if (!w.ok) continue; // másik eszköz közben írt: újra letöltjük és összefésüljük
 				rev = w.rev;
+				// Az összefésült többletpéldányok már benne vannak a feltöltött fájlban: törölhetők.
+				for (const ref of mergedCopies) await provider.discardCopy?.(ref).catch(() => {});
 			}
 			return { ok: true, uploaded: upload, changedLocal, rev, report, writtenAt: now() };
 		}

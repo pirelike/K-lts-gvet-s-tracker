@@ -515,3 +515,26 @@ után döntöttem el; a tervezett viselkedés (ütközésmentes id-k, LWW, jelö
 - **A `start()` már utólag is bekötheti a figyelőket** (láthatóság, `online`): a kapcsolat a feloldás után jön
   létre, így a figyelőket nem lehetett a `start()`-ban egyszer, feltétel nélkül bekötni. Az e2e találta meg.
 - A `?syncProvider=memory` az URL lekérdezőszövegében marad meg, a hash-router nem bántja.
+
+### 8–9. fázis (`gdrive.ts`, `dropbox.ts`)
+
+- **Valós kipróbálás nem történt.** A két szolgáltató a hamis `fetch`-csel és hamis GIS-szel írt mock-tesztekkel
+  (URL-ek, fejlécek, 401/403/404/409/429/5xx, conflict → újrapróbálás) van lefedve. A Google kliens-azonosító és a
+  Dropbox app key nélkül a tényleges bejelentkezés nem próbálható ki; az útmutató a *12.* pontban van.
+- **Több felhőfájl (Drive):** a `RemoteFile` új, opcionális `extra` mezője a további példányokat adja, a
+  `SyncProvider.discardCopy(ref)` törli őket. A `syncOnce` az azonos kulccsal olvasható példányokat a legrégebbi
+  fájlba fésüli, feltölt, és csak utána törli a többletet. Amit nem tud beolvasni (pl. más jelszó), azt nem
+  törli. A terv szerint ez a szolgáltatón belül dőlt volna el, de az összefésüléshez a kulcs és a `mergeStates`
+  kell, ezért a mag végzi. A keresés a `createdTime` mezőt is kéri, ebből következik a „legrégebbi".
+- **`ensureToken` kivételt dobhat** (`SyncNetworkError`): a Dropbox tokenfrissítése és a GIS-szkript betöltése
+  hálózat nélkül nem „szünetel", hanem „nincs kapcsolat". A motor ezt hálózati hibaként kezeli (visszalépés).
+- **Google-bejelentkezés:** az első `requestAccessToken` `prompt` nélkül fut (a GIS dönt a fiókválasztóról), a
+  megújítás `prompt: ''`-vel. A hozzáférési token (lejárattal és e-mail címmel) a `meta.sync.tokens` alatt él,
+  hogy egy órán belüli újraindításnál ne kelljen új ablak. Csendes megújítást időtúllépés zár le (15 mp).
+- **Dropbox átirányítás:** `consumeDropboxRedirect` az indulásnál (`sync.attach`) cseréli a kódot tokenre és
+  tisztítja az URL-t, a token a feloldásig `sessionStorage`-ban vár; a `SyncProvider.resume()` és a
+  `SyncEngine.resumeConnect()` (az `+layout.svelte` hívja feloldás után) zárja le a csatlakozást a jelszó-lépésnél.
+  Ha a Dropboxot az első indításról indítják, a PIN-t az átirányítás után újra be kell állítani, mert az app
+  újratölt; a token ezt kivárja. A hibák (megtagadott hozzáférés, nem egyező `state`) is a felhasználóhoz jutnak.
+- Az `available()` mindkét szolgáltatónál a build `VITE_*` változójától függ; nélküle a szolgáltató nem jelenik
+  meg, és a felület a beállítási útmutatót mutatja.

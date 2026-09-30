@@ -5,10 +5,19 @@
 
 export type ProviderId = 'gdrive' | 'dropbox' | 'memory';
 
+/** Ugyanannak a szinkronfájlnak egy másik, egyidejűleg létrejött példánya (két eszköz egyszerre hozott létre fájlt). */
+export interface RemoteCopy {
+	text: string;
+	/** A szolgáltató saját azonosítója a példányhoz (Drive: fájlazonosító); a `discardCopy` kapja. */
+	ref: string;
+}
+
 export interface RemoteFile {
 	text: string;
 	/** A fájl változatának azonosítója (Drive: `version`, Dropbox: `rev`); feltételes íráshoz kell. */
 	rev: string;
+	/** A további példányok; a motor összefésüli őket, és az összefésült eredmény feltöltése után törli. */
+	extra?: RemoteCopy[];
 }
 
 export type WriteResult = { ok: true; rev: string } | { ok: false; conflict: true };
@@ -32,6 +41,13 @@ export interface SyncProvider {
 	write(text: string, prevRev: string | null): Promise<WriteResult>;
 	/** A felhőben tárolt fájl törlése (a „Felhőben tárolt adatok törlése" gomb). */
 	removeFile(): Promise<void>;
+	/** Egy már összefésült többletpéldány törlése (csak ha a szolgáltató több példányt is tud adni). */
+	discardCopy?(ref: string): Promise<void>;
+	/**
+	 * Átirányításos bejelentkezésnél (Dropbox): ha a lap újratöltése előtt a bejelentkezés már megtörtént,
+	 * itt fejeződik be. `null` = nincs félbehagyott csatlakozás.
+	 */
+	resume?(): Promise<{ account: string } | null>;
 	/** Token visszavonása és a szolgáltató helyi adatainak törlése; a felhőbeli fájl megmarad. */
 	disconnect(): Promise<void>;
 }

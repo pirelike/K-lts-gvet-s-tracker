@@ -678,3 +678,117 @@ describe('kulcs és korszak első csatlakozáskor', () => {
 		expect((await engine.syncNow())?.ok).toBe(true);
 	});
 });
+
+describe('több felhőfájl (két eszköz egyszerre hozott létre fájlt)', () => {
+	it('az olvashatatlan (más jelszóval írt) többletpéldányt nem törli, és az elsődleges szinkron zavartalan', async () => {
+		const cloud = createMemoryBackend();
+		const A = await device(cloud);
+		const other = await device(createMemoryBackend());
+		await addTx(A, { description: 'A' });
+		await connect(A);
+		await addTx(other, { description: 'idegen' });
+		await connect(other, { password: 'egeszen-mas-jelszo' });
+		// Az `other` eszköz saját, más jelszóval titkosított felhőfájlja.
+		const otherKey = (await other.repo.getMeta<import('../src/lib/sync/format').SyncKey>(META_SYNC_KEY))!;
+		const { encodeSyncFile } = await import('../src/lib/sync/format');
+		const { readLocalState } = await import('../src/lib/sync/core');
+		const foreign = await encodeSyncFile(await readLocalState(other.repo), { key: otherKey, deviceId: 'x' });
+		const discarded: string[] = [];
+		const inner = createMemoryProvider(cloud, { enabled: true });
+		const wrapped: SyncProvider = {
+			...inner,
+			read: async () => {
+				const f = await inner.read();
+				return f && { ...f, extra: [{ text: foreign, ref: 'idegen-1' }] };
+			},
+			discardCopy: async (ref) => void discarded.push(ref)
+		};
+		const key = (await A.repo.getMeta<import('../src/lib/sync/format').SyncKey>(META_SYNC_KEY))!;
+		const res = await syncOnce({ repo: A.repo, provider: wrapped, key, deviceId: 'a', lastSyncAt: null });
+		expect(res.ok).toBe(true);
+		expect(discarded).toEqual([]); // amit nem tudtunk beolvasni, azt nem töröljük
+		expect(await descriptions(A)).toEqual(['A']);
+	});
+
+	it('ugyanazzal a kulccsal olvasható többletpéldány összefésülődik, majd törlésre kerül', async () => {
+		const cloud = createMemoryBackend();
+		const A = await device(cloud);
+		const B = await device(createMemoryBackend());
+		await addTx(A, { description: 'A' });
+		await connect(A);
+		// B ugyanahhoz a jelszóhoz/sóhoz jut: átvesz mindent A-tól, majd külön felvesz egy tételt, és a saját példányát „külön fájlként" írja.
+		const key = (await A.repo.getMeta<import('../src/lib/sync/format').SyncKey>(META_SYNC_KEY))!;
+		const { encodeSyncFile } = await import('../src/lib/sync/format');
+		const { readLocalState } = await import('../src/lib/sync/core');
+		await B.repo.replaceAll((await A.repo.loadAll()), undefined, undefined, { epoch: (await A.repo.getSyncMeta()).epoch!, tombstones: {} });
+		await addTx(B, { description: 'B külön' });
+		const copyText = await encodeSyncFile(await readLocalState(B.repo), { key, deviceId: 'b' });
+
+		const discarded: string[] = [];
+		const inner = createMemoryProvider(cloud, { enabled: true });
+		const wrapped: SyncProvider = {
+			...inner,
+			read: async () => {
+				const f = await inner.read();
+				return f && { ...f, extra: [{ text: copyText, ref: 'masolat-1' }] };
+			},
+			discardCopy: async (ref) => void discarded.push(ref)
+		};
+		const res = await syncOnce({ repo: A.repo, provider: wrapped, key, deviceId: 'a', lastSyncAt: null });
+		expect(res).toMatchObject({ ok: true, uploaded: true });
+		expect(await descriptions(A)).toEqual(['A', 'B külön']);
+		expect(discarded).toEqual(['masolat-1']);
+		const remote = await decodeSyncFile(cloud.file!.text, key);
+		expect(remote.ok && remote.state.data.transactions.map((t) => t.description).sort()).toEqual(['A', 'B külön']);
+	});
+});
+
+describe('átirányításos bejelentkezés befejezése (resumeConnect)', () => {
+	it('a félbehagyott csatlakozás a feloldás után a jelszó-lépésnél folytatódik; ha nincs mit, null; hibát átad', async () => {
+		const cloud = createMemoryBackend();
+		const A = await device(cloud);
+		await addTx(A, { description: 'A' });
+		await connect(A);
+
+		const repo = new LedgerRepo(await openLedgerDb(`engine-resume-${n++}`));
+		await repo.seedDefaultsIfNeeded();
+		let mode: 'ok' | 'none' | 'error' = 'ok';
+		const engine = new SyncEngine();
+		engine.configure({
+			factories: {
+				memory: (storage) => {
+					const p = createMemoryProvider(cloud, { enabled: true, account: 'anna@example.com' });
+					return {
+						...p,
+						resume: async () => {
+							if (mode === 'error') throw new Error('A Dropbox-hozzáférést megtagadtad');
+							if (mode === 'none') return null;
+							await storage.save({ accessToken: 'x' });
+							return { account: 'anna@example.com' };
+						}
+					};
+				}
+			},
+			redirects: [],
+			kdfIterations: 1000,
+			timers: fakeTimers().timers
+		});
+		await engine.attach({ repo, reload: async () => {}, unlocked: () => true });
+
+		mode = 'none';
+		expect(await engine.resumeConnect()).toBeNull();
+		mode = 'error';
+		expect(await engine.resumeConnect()).toEqual({ ok: false, error: 'A Dropbox-hozzáférést megtagadtad' });
+		expect(engine.probe).toBeNull();
+
+		mode = 'ok';
+		const r = await engine.resumeConnect();
+		expect(r).toMatchObject({ ok: true, probe: { account: 'anna@example.com', remote: { exists: true, encrypted: true } } });
+		expect(engine.probe).not.toBeNull();
+		// A szolgáltató által mentett tokenek a kapcsolatba kerülnek.
+		expect(await engine.completeConnect({ password: PASSWORD })).toMatchObject({ ok: true });
+		expect((await repo.getMeta<{ tokens: unknown }>(META_SYNC))?.tokens).toEqual({ accessToken: 'x' });
+		expect(engine.probe).toBeNull();
+		expect(await engine.resumeConnect()).toBeNull(); // már csatlakoztatva
+	});
+});

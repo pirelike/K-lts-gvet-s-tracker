@@ -21,8 +21,8 @@ import {
 } from './core';
 import { createSyncKey, decodeSyncFile, deriveSyncKey, peekSyncFile, type SyncKey } from './format';
 import type { MergeReport, SyncState } from './merge';
-import type { ProviderId, ProviderStorage, RemoteFile, SyncProvider } from './provider';
-import { providerFactories, type ProviderFactory } from './providers';
+import { SyncNetworkError, type ProviderId, type ProviderStorage, type RemoteFile, type SyncProvider } from './provider';
+import { providerFactories, redirectHandlers, PROVIDER_ORDER, type ProviderFactory } from './providers';
 import { passwordError } from '../db/crypto';
 import { stamp } from './stamp';
 
@@ -108,6 +108,7 @@ export class SyncEngine {
 	private key: SyncKey | null = null;
 	private provider: SyncProvider | null = null;
 	private factories: Partial<Record<ProviderId, ProviderFactory>> = providerFactories;
+	private redirects: (() => Promise<unknown>)[] = redirectHandlers;
 	private active = false;
 	private running = false;
 	private debounce: unknown = null;
@@ -135,7 +136,9 @@ export class SyncEngine {
 		now?: () => number;
 		kdfIterations?: number;
 		timers?: Timers;
+		redirects?: (() => Promise<unknown>)[];
 	}) {
+		if (opts.redirects) this.redirects = opts.redirects;
 		if (opts.timers) this.timers = opts.timers;
 		if (opts.factories) this.factories = opts.factories;
 		if (opts.now) this.now = opts.now;
@@ -145,6 +148,8 @@ export class SyncEngine {
 	/** A gazda bekötése (adatbázis megnyitása után, még zárolt állapotban). */
 	async attach(host: SyncHost) {
 		this.host = host;
+		// Az átirányításos bejelentkezés (Dropbox) eredményét még a felület előtt, az URL megtisztításával dolgozzuk fel.
+		for (const handle of this.redirects) await handle().catch(() => {});
 		await this.restore();
 	}
 
@@ -330,28 +335,35 @@ export class SyncEngine {
 		this.status = 'syncing';
 		const dirtyAtStart = this.dirtyCounter;
 
-		if (!tokenReady && !(await provider.ensureToken(false))) {
-			this.status = 'paused';
-			return null;
+		// A token megújítása is hívhat hálózatot (Dropbox): a hiba ugyanúgy „nincs kapcsolat", mint a fájlműveleteké.
+		const token = async (): Promise<boolean | Extract<SyncOutcome, { ok: false }>> => {
+			try {
+				return await provider.ensureToken(false);
+			} catch (e) {
+				return { ok: false, kind: e instanceof SyncNetworkError ? 'network' : 'provider', error: e instanceof Error ? e.message : String(e) };
+			}
+		};
+		if (!tokenReady) {
+			const t = await token();
+			if (t === false) {
+				this.status = 'paused';
+				return null;
+			}
+			if (typeof t === 'object') return this.failed(t);
 		}
 		let outcome = await this.once();
 		if (!outcome.ok && outcome.kind === 'auth') {
 			// A token időközben lejárt: egy csendes megújítás, és még egy próba.
-			if (await provider.ensureToken(false)) outcome = await this.once();
+			const t = await token();
+			if (t === true) outcome = await this.once();
+			else if (typeof t === 'object') return this.failed(t);
 			if (!outcome.ok && outcome.kind === 'auth') {
 				this.status = 'paused';
 				return outcome;
 			}
 		}
 
-		if (!outcome.ok) {
-			this.fail(outcome.kind, outcome.error);
-			if (outcome.kind === 'network' || outcome.kind === 'conflict' || outcome.kind === 'provider') {
-				this.backoff = this.backoff ? Math.min(this.backoff * 2, BACKOFF_MAX_MS) : BACKOFF_START_MS;
-				this.scheduleRetry(this.backoff);
-			}
-			return outcome;
-		}
+		if (!outcome.ok) return this.failed(outcome);
 
 		this.backoff = 0;
 		this.error = '';
@@ -366,6 +378,16 @@ export class SyncEngine {
 		if (this.active && outcome.changedLocal) await host.reload();
 		host.onSynced?.(outcome.writtenAt);
 		this.emit(outcome.report, outcome.changedLocal);
+		return outcome;
+	}
+
+	/** Sikertelen futás: hibaállapot, és ahol van értelme, exponenciális visszalépéssel újrapróbálás. */
+	private failed(outcome: Extract<SyncOutcome, { ok: false }>): SyncOutcome {
+		this.fail(outcome.kind, outcome.error);
+		if (outcome.kind === 'network' || outcome.kind === 'conflict' || outcome.kind === 'provider') {
+			this.backoff = this.backoff ? Math.min(this.backoff * 2, BACKOFF_MAX_MS) : BACKOFF_START_MS;
+			this.scheduleRetry(this.backoff);
+		}
 		return outcome;
 	}
 
@@ -421,9 +443,9 @@ export class SyncEngine {
 	/** A szolgáltatók, amelyeket fel lehet kínálni (van hozzájuk beállított kliens-azonosító). */
 	availableProviders(): { id: ProviderId; label: string }[] {
 		const out: { id: ProviderId; label: string }[] = [];
-		for (const [id, factory] of Object.entries(this.factories) as [ProviderId, ProviderFactory][]) {
-			const p = factory(this.storage());
-			if (p.available()) out.push({ id, label: p.label });
+		for (const id of PROVIDER_ORDER) {
+			const p = this.factories[id]?.(this.storage());
+			if (p?.available()) out.push({ id, label: p.label });
 		}
 		return out;
 	}
@@ -436,23 +458,62 @@ export class SyncEngine {
 		await this.cancelConnect();
 		const factory = this.factories[id];
 		if (!factory) throw new Error('Ismeretlen szolgáltató');
-		this.pending = { provider: factory(this.storage()), account: '', remoteFile: null, tokens: null };
-		const p = this.pending;
+		const p: NonNullable<SyncEngine['pending']> = { provider: undefined as never, account: '', remoteFile: null, tokens: null };
+		this.pending = p;
+		p.provider = factory(this.storage());
 		try {
 			const { account } = await p.provider.connect();
 			p.account = account;
-			p.remoteFile = await p.provider.read();
+			return await this.probeRemote(p);
 		} catch (e) {
 			await this.cancelConnect();
 			throw e;
 		}
+	}
+
+	/**
+	 * A bejelentkezés kész (a szolgáltatónál is): a felhőfájl megnézése és a `probe` állapot beállítása. Ha a
+	 * fájl nem szinkronfájl, hibát dob (és a hívó lezárja a csatlakozást).
+	 */
+	private async probeRemote(p: NonNullable<SyncEngine['pending']>): Promise<ConnectProbe> {
+		p.remoteFile = await p.provider.read();
 		if (!p.remoteFile) return (this.probe = { account: p.account, remote: { exists: false } });
 		const head = peekSyncFile(p.remoteFile.text);
-		if (!head.ok) {
-			await this.cancelConnect();
-			throw new Error(head.error);
-		}
+		if (!head.ok) throw new Error(head.error);
 		return (this.probe = { account: p.account, remote: { exists: true, encrypted: head.encrypted } });
+	}
+
+	/**
+	 * Átirányításos bejelentkezés (Dropbox) befejezése a lap újratöltése és a PIN-feloldás után. `null`, ha nincs
+	 * félbehagyott csatlakozás; a sikeres eredmény után a felület a szinkronjelszót kéri (`probe`).
+	 */
+	async resumeConnect(): Promise<{ ok: true; probe: ConnectProbe } | { ok: false; error: string } | null> {
+		if (this.conn || this.pending || !this.host) return null;
+		for (const id of PROVIDER_ORDER) {
+			const factory = this.factories[id];
+			if (!factory) continue;
+			const p: NonNullable<SyncEngine['pending']> = { provider: undefined as never, account: '', remoteFile: null, tokens: null };
+			this.pending = p;
+			p.provider = factory(this.storage());
+			if (!p.provider.resume) {
+				this.pending = null;
+				continue;
+			}
+			try {
+				const r = await p.provider.resume();
+				if (!r) {
+					this.pending = null;
+					continue;
+				}
+				p.account = r.account;
+				return { ok: true, probe: await this.probeRemote(p) };
+			} catch (e) {
+				await this.cancelConnect();
+				return { ok: false, error: e instanceof Error ? e.message : String(e) };
+			}
+		}
+		this.pending = null;
+		return null;
 	}
 
 	async cancelConnect() {
