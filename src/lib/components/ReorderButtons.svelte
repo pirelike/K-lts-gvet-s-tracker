@@ -5,7 +5,7 @@
 		count,
 		label,
 		onmove
-	}: { index: number; count: number; label: string; onmove: (dir: -1 | 1) => void | Promise<void> } = $props();
+	}: { index: number; count: number; label: string; onmove: (dir: -1 | 1) => unknown } = $props();
 </script>
 
 <span class="reorder" role="group" aria-label={`${label} sorrendje`}>

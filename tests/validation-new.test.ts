@@ -83,6 +83,15 @@ describe('cél és sablon', () => {
 		const dup = validateGoal({ name: 'laptop', icon: '', color: '#3b82f6', target: '5', saved: '', accountId: null, deadline: '' }, [{ id: 1, name: 'Laptop', icon: '', color: '#000000', target: 1, saved: 0, accountId: null, deadline: null, archived: false, sortOrder: 1, createdAt: 1, updatedAt: 1 }]);
 		expect(!dup.ok && dup.errors.name).toMatch(/Már van/);
 	});
+	it('számlához kötött célnál a rejtett „eddig félretéve" mező hibás értéke nem akadályoz', () => {
+		const base = { name: 'Nyaralás', icon: '', color: '#3b82f6', target: '1000', deadline: '' };
+		const tracked = validateGoal({ ...base, saved: 'abc', accountId: 3 }, []);
+		expect(tracked.ok && tracked.value).toMatchObject({ saved: 0, accountId: 3 });
+		const negative = validateGoal({ ...base, saved: '-5', accountId: 3 }, []);
+		expect(negative.ok && negative.value.saved).toBe(0);
+		const manual = validateGoal({ ...base, saved: 'abc', accountId: null }, []);
+		expect(!manual.ok && manual.errors.saved).toBeTruthy();
+	});
 	it('sablon neve', () => {
 		expect(validateTemplateName('', [])).toBeTruthy();
 		expect(validateTemplateName('Kávé', [])).toBeNull();

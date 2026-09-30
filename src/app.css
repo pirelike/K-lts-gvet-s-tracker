@@ -195,12 +195,17 @@ textarea {
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
+/* !important: a globális input-szabályok (width: 100%, min-height, padding) különben felülírnák, és a rejtett fájlválasztó vízszintes görgetést okozna. */
 .sr-only {
-	position: absolute;
-	width: 1px;
-	height: 1px;
-	overflow: hidden;
-	clip: rect(0 0 0 0);
+	position: absolute !important;
+	width: 1px !important;
+	height: 1px !important;
+	min-height: 0 !important;
+	padding: 0 !important;
+	margin: -1px !important;
+	border: 0 !important;
+	overflow: hidden !important;
+	clip: rect(0 0 0 0) !important;
 	white-space: nowrap;
 }
 
@@ -262,6 +267,36 @@ textarea {
 .btn.block {
 	width: 100%;
 }
+/* Gombsor: keskeny képernyőn a gombok egyenletesen kitöltik a sort, nem csúszkálnak össze-vissza. */
+.actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 10px;
+}
+@media (max-width: 520px) {
+	.actions {
+		gap: 8px;
+	}
+	.actions > .btn {
+		flex: 1 1 auto;
+	}
+}
+/* Jelölőnégyzetes sor: nagyobb érintési felület, a négyzet a szöveg első sorához igazodik. */
+.check {
+	display: flex;
+	align-items: flex-start;
+	gap: 10px;
+	min-height: 32px;
+	cursor: pointer;
+}
+.check > input[type='checkbox'] {
+	flex: none;
+	width: 20px;
+	height: 20px;
+	margin: 1px 0 0;
+	accent-color: var(--primary);
+}
 .btn:disabled {
 	opacity: 0.55;
 	cursor: not-allowed;
@@ -290,6 +325,7 @@ input[type='text'],
 input[type='search'],
 input[type='number'],
 input[type='date'],
+input[type='time'],
 input[type='password'],
 input[type='file'],
 select,

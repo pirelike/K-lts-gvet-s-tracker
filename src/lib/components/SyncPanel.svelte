@@ -180,14 +180,14 @@
 					Egy másik eszközön pénznemet váltottak vagy mentést töltöttek vissza, ezért az itteni, még nem szinkronizált módosítások
 					elvesztek. Az előző állapotról ({when(sync.lostBackup.at)}) mentés maradt.
 				</p>
-				<div class="row wrap">
+				<div class="actions">
 					<button class="btn primary" type="button" onclick={downloadLostBackup}>Mentés letöltése</button>
 					<button class="btn" type="button" onclick={() => sync.clearLostBackup()}>Elvetés</button>
 				</div>
 			</div>
 		{/if}
 
-		<div class="row wrap">
+		<div class="actions">
 			<button class="btn primary" type="button" disabled={busy || sync.status === 'syncing'} onclick={syncNow}>Szinkron most</button>
 			{#if sync.encrypted}
 				<button class="btn" type="button" aria-expanded={changeOpen} onclick={() => (changeOpen = !changeOpen)}>Szinkronjelszó cseréje…</button>
@@ -246,7 +246,7 @@
 					{probe.remote.exists ? 'A felhőben titkosítatlan szinkronfájl van.' : 'A felhőben még nincs szinkronfájl.'}
 					A fájl titkosítva tárolódik, a jelszót eszközönként egyszer kell megadni. Ha elfelejted, a felhőbeli adatok nem nyithatók meg.
 				</p>
-				<label class="row"><input type="checkbox" bind:checked={unencrypted} /> Titkosítás nélkül (nem ajánlott)</label>
+				<label class="check"><input type="checkbox" bind:checked={unencrypted} /> Titkosítás nélkül (nem ajánlott)</label>
 				{#if unencrypted}
 					<p class="notice warn" role="alert">A felhőben lévő fájl bárki számára olvasható lesz, aki hozzáfér a tárhelyedhez (például a szolgáltató).</p>
 				{:else}
@@ -261,7 +261,7 @@
 				{/if}
 			{/if}
 			{#if error}<p class="error" role="alert">{error}</p>{/if}
-			<div class="row wrap">
+			<div class="actions">
 				<button class="btn primary" type="button" disabled={busy} onclick={() => connect()}>Csatlakozás</button>
 				<button class="btn" type="button" disabled={busy} onclick={cancel}>Mégse</button>
 			</div>
@@ -273,7 +273,7 @@
 			Nincs hozzá szerver: az app továbbra is offline is működik, a szinkron csak egy opcionális réteg.
 		</p>
 		{#if providers.length > 0}
-			<div class="row wrap">
+			<div class="actions">
 				{#each providers as p, i}
 					<button class="btn" class:primary={i === 0} type="button" disabled={busy} onclick={() => begin(p.id)} data-provider={p.id}>{BUTTON_LABEL[p.id]}</button>
 				{/each}

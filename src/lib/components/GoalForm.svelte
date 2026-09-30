@@ -14,7 +14,8 @@
 	}: {
 		initial?: Goal;
 		submitLabel: string;
-		onsave: (v: GoalInput) => Promise<void> | void;
+		/** `false`: a mentés nem sikerült, az űrlap megtartja a beírt adatokat. */
+		onsave: (v: GoalInput) => Promise<boolean | void> | boolean | void;
 		oncancel?: () => void;
 	} = $props();
 
@@ -27,18 +28,25 @@
 	let accountId = $state<number | null>(init?.accountId ?? null);
 	let deadline = $state(init?.deadline ?? '');
 	let errors = $state<Partial<Record<GoalField, string>>>({});
+	let busy = $state(false);
 	const uid = $props.id();
 	const accounts = $derived(ledger.accounts.filter((a) => !a.archived || a.id === init?.accountId));
 
 	async function submit(e: SubmitEvent) {
 		e.preventDefault();
+		if (busy) return; // dupla koppintásra ne jöjjön létre két cél
 		const res = validateGoal({ name, icon, color, target, saved, accountId, deadline }, ledger.goals, init?.id);
 		if (!res.ok) {
 			errors = res.errors;
 			return;
 		}
 		errors = {};
-		await onsave(res.value);
+		busy = true;
+		try {
+			if ((await onsave(res.value)) === false) return;
+		} finally {
+			busy = false;
+		}
 		if (!init) {
 			name = '';
 			target = '';
@@ -97,8 +105,8 @@
 			{/each}
 		</div>
 	</fieldset>
-	<div class="row wrap">
-		<button class="btn primary" type="submit">{submitLabel}</button>
+	<div class="actions">
+		<button class="btn primary" type="submit" disabled={busy}>{submitLabel}</button>
 		{#if oncancel}<button class="btn" type="button" onclick={oncancel}>Mégse</button>{/if}
 	</div>
 </form>

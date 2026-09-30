@@ -19,20 +19,23 @@
 	const active = $derived(ledger.goals.filter((g) => !g.archived).sort((a, b) => a.sortOrder - b.sortOrder));
 	const archived = $derived(ledger.goals.filter((g) => g.archived));
 
-	async function run(fn: () => Promise<unknown>, ok?: string) {
+	/** `true`, ha a művelet sikerült; hibánál toast jelzi, és `false` a válasz (hogy az űrlapok ne ürüljenek ki / záródjanak be). */
+	async function run(fn: () => Promise<unknown>, ok?: string): Promise<boolean> {
 		try {
 			await fn();
 			if (ok) toasts.show(ok);
+			return true;
 		} catch (e) {
 			toasts.error(e instanceof LedgerError || e instanceof Error ? e.message : 'A művelet nem sikerült');
+			return false;
 		}
 	}
 
 	async function contribute(g: Goal, sign: 1 | -1) {
 		const r = evaluateExpression(amounts[g.id] ?? '');
 		if (!r.ok || r.value <= 0) return toasts.error('Adj meg egy pozitív összeget');
-		await run(() => ledger.addToGoal(g.id, sign * r.value), sign > 0 ? 'Befizetés rögzítve' : 'Kivétel rögzítve');
-		amounts[g.id] = '';
+		if (sign < 0 && r.value > g.saved) return toasts.error(g.saved > 0 ? `Legfeljebb ${formatMoney(g.saved)} vehető ki` : 'Még nincs mit kivenni');
+		if (await run(() => ledger.addToGoal(g.id, sign * r.value), sign > 0 ? 'Befizetés rögzítve' : 'Kivétel rögzítve')) amounts[g.id] = '';
 	}
 
 </script>
@@ -66,27 +69,38 @@
 				<p class="small muted">
 					Még {formatMoney(p.remaining)} hiányzik.
 					{#if p.daysLeft !== null && p.daysLeft < 0}<strong class="exp">A határidő lejárt.</strong>
+					{:else if p.daysLeft === 0}<strong>A határidő ma van.</strong>
 					{:else if p.neededPerMonth !== null}Ehhez havonta ~<strong>{formatMoney(p.neededPerMonth)}</strong> kell félretenni ({p.daysLeft} nap van hátra).{/if}
 				</p>
 			{/if}
 		</div>
 		{#if g.accountId === null && !g.archived}
-			<div class="row wrap">
+			<div class="contrib">
 				<input class="amt" type="text" inputmode="decimal" autocomplete="off" placeholder="összeg" aria-label={`Összeg: ${g.name}`} bind:value={amounts[g.id]}
 					onkeydown={(e) => e.key === 'Enter' && (e.preventDefault(), contribute(g, 1))} />
 				<button class="btn small primary" type="button" onclick={() => contribute(g, 1)}>+ Befizetés</button>
 				<button class="btn small" type="button" onclick={() => contribute(g, -1)}>− Kivétel</button>
 			</div>
 		{/if}
-		<div class="row wrap">
-			<button class="btn small" type="button" onclick={() => (editingId = editingId === g.id ? null : g.id)}>{editingId === g.id ? 'Bezár' : 'Szerkesztés'}</button>
+		<div class="actions">
+			<button class="btn small" type="button" aria-expanded={editingId === g.id} onclick={() => (editingId = editingId === g.id ? null : g.id)}>{editingId === g.id ? 'Bezár' : 'Szerkesztés'}</button>
 			<button class="btn small" type="button" onclick={() => run(() => ledger.setGoalArchived(g.id, !g.archived), g.archived ? 'Cél visszaállítva' : 'Cél archiválva')}>
 				{g.archived ? 'Visszaállítás' : 'Archiválás'}
 			</button>
 			<ConfirmButton label="Törlés" onconfirm={() => run(() => ledger.deleteGoal(g.id), 'Cél törölve')} />
 		</div>
 		{#if editingId === g.id}
-			<GoalForm initial={g} submitLabel="Mentés" onsave={async (v) => { await run(() => ledger.updateGoal(g.id, v), 'Cél módosítva'); editingId = null; }} oncancel={() => (editingId = null)} />
+			<hr />
+			<GoalForm
+				initial={g}
+				submitLabel="Mentés"
+				onsave={async (v) => {
+					const saved = await run(() => ledger.updateGoal(g.id, v), 'Cél módosítva');
+					if (saved) editingId = null;
+					return saved;
+				}}
+				oncancel={() => (editingId = null)}
+			/>
 		{/if}
 	</li>
 {/snippet}
@@ -124,9 +138,23 @@
 </div>
 
 <style>
+	/* Összeg + két gomb: keskeny képernyőn az összeg külön, teljes szélességű sorban, alatta egyenlő gombok. */
+	.contrib {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 8px;
+	}
 	.amt {
-		width: 9em;
-		min-height: 36px;
+		grid-column: 1 / -1;
+		min-height: 40px;
 		padding: 4px 10px;
+	}
+	@media (min-width: 520px) {
+		.contrib {
+			grid-template-columns: minmax(8em, 1fr) auto auto;
+		}
+		.amt {
+			grid-column: auto;
+		}
 	}
 </style>

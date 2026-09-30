@@ -157,8 +157,8 @@
 					{#each ledger.activeAccounts as a}<option value={a.id}>{a.name}</option>{/each}
 				</select>
 			</div>
-			<label class="row"><input type="checkbox" bind:checked={createMissing} /> Ismeretlen kategóriák és számlák létrehozása</label>
-			<label class="row"><input type="checkbox" bind:checked={skipDuplicates} /> Már meglévő tételek kihagyása (azonos dátum, összeg, leírás, számla)</label>
+			<label class="check"><input type="checkbox" bind:checked={createMissing} /> Ismeretlen kategóriák és számlák létrehozása</label>
+			<label class="check"><input type="checkbox" bind:checked={skipDuplicates} /> Már meglévő tételek kihagyása (azonos dátum, összeg, leírás, számla)</label>
 			<div class="field">
 				<label for="imp-tag">Címke az importált tételekre</label>
 				<input id="imp-tag" type="text" maxlength="30" bind:value={importTag} />
