@@ -538,3 +538,20 @@ után döntöttem el; a tervezett viselkedés (ütközésmentes id-k, LWW, jelö
   újratölt; a token ezt kivárja. A hibák (megtagadott hozzáférés, nem egyező `state`) is a felhasználóhoz jutnak.
 - Az `available()` mindkét szolgáltatónál a build `VITE_*` változójától függ; nélküle a szolgáltató nem jelenik
   meg, és a felület a beállítási útmutatót mutatja.
+
+### 10. fázis (README, `pages.yml`)
+
+- A README új „Szinkronizálás" fejezete a működést, a bekapcsolást, a Google/Dropbox beállítás lépéseit, a
+  korlátokat (Google-token lejárat, `Goal.saved` LWW, 180 napos jelölők, korszakváltás, jelszócsere) és a
+  memória-szolgáltatós kipróbálást tartalmazza. Az adat-táblázat „Nincs szinkron eszközök között" sora és a „Még
+  nem szerepel" lista frissült; a séma- és mentésverzió-szakasz az új azonosító- és rendezési szabályt is leírja.
+- A `pages.yml` build lépése a repó `GOOGLE_CLIENT_ID` és `DROPBOX_APP_KEY` *Variables* értékét adja át
+  `VITE_GOOGLE_CLIENT_ID` és `VITE_DROPBOX_APP_KEY` néven. A repóban új a `.env.example` helyi fejlesztéshez.
+
+### Állapot
+
+| Fázis | Állapot |
+| --- | --- |
+| 1–7 | kész, valódi fiók nélkül tesztelve (egységtesztek, tulajdonság-tesztek, motor-tesztek, `e2e/sync.mjs`) |
+| 8–9 | kész, mock-tesztekkel; **a valós próbához a felhasználó Google kliens-azonosítója és Dropbox app key-e kell** |
+| 10 | kész |

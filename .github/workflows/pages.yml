@@ -29,9 +29,13 @@ jobs:
       - run: npm run check
       - run: npm test
       # A Pages a https://<felhasználó>.github.io/<repo-neve>/ címen szolgál ki, ezért kell a base path.
+      # A szinkron nyilvános kliens-azonosítói a repó Variables értékeiből jönnek (Settings → Secrets and variables →
+      # Actions → Variables). Nem titkok; ha hiányoznak, az adott szolgáltató nem jelenik meg az appban.
       - run: npm run build
         env:
           BASE_PATH: /${{ github.event.repository.name }}
+          VITE_GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+          VITE_DROPBOX_APP_KEY: ${{ vars.DROPBOX_APP_KEY }}
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
