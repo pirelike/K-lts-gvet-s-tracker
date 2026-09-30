@@ -400,3 +400,33 @@ a felhasználó kliens-azonosítói kellenek.
 ## Eltérések
 
 *(Az implementáló session ide írja, ha a tervtől el kellett térni, és miért.)*
+
+Az alábbi pontokban a megvalósítás eltér a tervtől, vagy kiegészíti azt. Mindegyiket a kód megvizsgálása
+után döntöttem el; a tervezett viselkedés (ütközésmentes id-k, LWW, jelölők) ezekkel együtt is teljesül.
+
+### 1–3. fázis
+
+- **Sorrend az id helyett `createdAt` szerint.** A terv nem számolt azzal, hogy az autoIncrement `id` eddig
+  egyben létrehozási sorrend is volt. `compareTx` (legújabb elöl), az ismert leírások „legutóbbi" választása,
+  a „legnagyobb tételek" döntetlenfeloldása és a `LedgerRepo.loadAll` rendezése az `id` helyett
+  `(createdAt, id)` szerint megy. Ezért a memória sorrendje betöltés után ugyanaz, mint korábban.
+- **`sync/stamp.ts`: szigorúan növekvő időbélyeg.** Egy millisecundumon belüli két módosítás korábban
+  ugyanazt a `Date.now()` értéket kapta, amit az `id` döntött el. Most a `createdAt`/`updatedAt` a főkönyvben
+  mindig szigorúan nő (a példaadatoké és a tömeges műveleteké is). A merge LWW-szabályának is ez kell.
+- **`add`/`addMany` a repóban hívja a `newId()`-t** (nem a `ledger.svelte.ts` minden hívási helyén), így nem
+  maradhat ki egy hívási hely. Ütközésnél (ConstraintError) új id-val újrapróbál.
+- **`applyRecurring`**: az id-t (`recurringTxId`, Web Crypto) a tranzakció megnyitása előtt számolja ki,
+  különben az IndexedDB-tranzakció a `await` alatt lezárulna. A tételt `put`-tal írja (idempotens).
+- **A visszavonások is új `updatedAt`-et adnak** (`restoreTx`, `restoreTxs`, `replaceTxs`), nem csak a
+  visszaállítás: különben egy, már szinkronizált módosítás visszavonása elveszne az összefésülésnél.
+- **Törlési jelző ideje** = `max(stamp(), a törölt sor updatedAt + 1)`. Így a törlés az általa törölt
+  változatot óra-eltérés esetén is legyőzi. Nem létező sor törlése nem ír jelölőt.
+- **`replaceAll` alapból új korszakot indít** (és törli a jelölőket), ezért a `switchCurrency` és az
+  `importBackup` nem kellett külön módosítani. A szinkron a saját korszakát és az összefésült jelölőket egy
+  negyedik paraméterben adja át. A példaadatok betöltése/törlése a `startEpoch()`-ot hívja.
+- **`wipeAll` nem indít új korszakot**, mert a teljes törlés a `meta` tárolót is üríti, vagyis a szinkron-
+  kapcsolatot (`meta.sync`) is. Az eszköz lecsatlakozik; a korszak az újracsatlakozáskor jön létre
+  (`ensureEpoch`), a *4.5* szabályai szerint. A felhőbeli fájlt a törlés nem érinti.
+- **Ismert, korábbról meglévő hiba:** az `e2e/features.mjs` „természetes nyelvű gyorsbevitel: kávé 891 tegnap"
+  lépése a `main`-en, a szinkron-változtatások nélkül is elbukik. Nem ehhez a munkához tartozik.
+

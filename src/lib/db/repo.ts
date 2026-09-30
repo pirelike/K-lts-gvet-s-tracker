@@ -5,6 +5,7 @@
 import { DEFAULT_PREFS, type Account, type LedgerSnapshot, type Prefs, type Recurring, type Transaction } from '../types';
 import { newId, recurringTxId } from '../sync/ids';
 import { stamp } from '../sync/stamp';
+import { isEpoch, newEpoch, tombstoneKey, type SyncEpoch, type Tombstones } from '../sync/tombstones';
 import { DEFAULT_ACCOUNTS, DEFAULT_CATEGORIES } from './defaults';
 import { ALL_STORES, DATA_STORES, done, inferAccountType, wrap, type DataStore } from './idb';
 
@@ -88,31 +89,45 @@ export class LedgerRepo {
 		}
 	}
 
-	/** Beszúrás vagy felülírás a megadott azonosítóval (szerkesztés, törlés visszavonása). */
+	/**
+	 * Beszúrás vagy felülírás a megadott azonosítóval (szerkesztés, törlés visszavonása). Ha az
+	 * azonosítóra törlési jelölő volt, az megszűnik: a visszaállított sor él.
+	 */
 	async put<T extends Row>(store: DataStore, value: T): Promise<void> {
-		const tx = this.db.transaction(store, 'readwrite');
-		tx.objectStore(store).put(plain(value));
-		await done(tx);
+		await this.putMany(store, [value]);
 	}
 
 	/** Több sor felülírása egyetlen tranzakcióban (csoportos módosítás, sorrend). */
 	async putMany<T extends Row>(store: DataStore, values: T[]): Promise<void> {
 		if (values.length === 0) return;
-		const tx = this.db.transaction(store, 'readwrite');
+		const tx = this.db.transaction([store, 'meta'], 'readwrite');
 		const os = tx.objectStore(store);
 		for (const v of values) os.put(plain(v));
+		await untombstone(tx.objectStore('meta'), store, values.map((v) => v.id));
 		await done(tx);
 	}
 
+	/**
+	 * Törlés. A törlési jelölő ugyanabban az IndexedDB-tranzakcióban íródik, mint a törlés, így nem
+	 * maradhat jelölő nélküli törlés. A jelölő ideje mindig újabb a törölt sor `updatedAt` értékénél:
+	 * a törlés az általa törölt változatot mindig legyőzi.
+	 */
 	async remove(store: DataStore, id: number): Promise<void> {
-		const tx = this.db.transaction(store, 'readwrite');
-		tx.objectStore(store).delete(id);
-		await done(tx);
+		await this.removeMany(store, [id]);
 	}
 
 	async removeMany(store: DataStore, ids: number[]): Promise<void> {
-		const tx = this.db.transaction(store, 'readwrite');
-		for (const id of ids) tx.objectStore(store).delete(id);
+		if (ids.length === 0) return;
+		const tx = this.db.transaction([store, 'meta'], 'readwrite');
+		const os = tx.objectStore(store);
+		const meta = tx.objectStore('meta');
+		const tombstones = await readTombstones(meta);
+		const rows = await Promise.all(ids.map((id) => wrap(os.get(id)) as Promise<{ updatedAt?: number } | undefined>));
+		ids.forEach((id, i) => {
+			os.delete(id);
+			if (rows[i]) tombstones[tombstoneKey(store, id)] = Math.max(stamp(), (rows[i]!.updatedAt ?? 0) + 1);
+		});
+		meta.put({ key: 'tombstones', value: tombstones });
 		await done(tx);
 	}
 
@@ -138,6 +153,31 @@ export class LedgerRepo {
 
 	async setPrefs(prefs: Prefs, updatedAt: number): Promise<void> {
 		await this.setMeta('prefs', { ...prefs, updatedAt });
+	}
+
+	/** A szinkronhoz tartozó adatok: a korszak (még nincs, ha az eszköz nem csatlakozott) és a törlési jelölők. */
+	async getSyncMeta(): Promise<{ epoch: SyncEpoch | null; tombstones: Tombstones }> {
+		const tx = this.db.transaction('meta', 'readonly');
+		const meta = tx.objectStore('meta');
+		const [epoch, tombstones] = await Promise.all([readEpoch(meta), readTombstones(meta)]);
+		return { epoch, tombstones };
+	}
+
+	/** Új korszak indítása (az adatok egésze egyszerre cserélődött): a régi jelölők elavulnak. */
+	async startEpoch(): Promise<SyncEpoch> {
+		const epoch = newEpoch();
+		const tx = this.db.transaction('meta', 'readwrite');
+		const meta = tx.objectStore('meta');
+		meta.put({ key: 'syncEpoch', value: epoch });
+		meta.put({ key: 'tombstones', value: {} });
+		await done(tx);
+		return epoch;
+	}
+
+	/** Ha még nincs korszak (első csatlakozás előtt), létrehoz egyet; a meglévőt visszaadja. */
+	async ensureEpoch(): Promise<SyncEpoch> {
+		const { epoch } = await this.getSyncMeta();
+		return epoch ?? this.startEpoch();
 	}
 
 	/** Első indításkor létrehozza az alap kategóriákat és számlákat (egyszer, egy tranzakcióban). */
@@ -174,7 +214,7 @@ export class LedgerRepo {
 		// előfordulást, ugyanaz az id keletkezik, és összefésüléskor egy tétel marad. A tranzakció
 		// megnyitása előtt számoljuk ki: a Web Crypto `await`-je közben az IndexedDB-tranzakció lezárulna.
 		const txId = row ? await recurringTxId(ruleId, handledDate) : 0;
-		const t = this.db.transaction(['recurring', 'transactions'], 'readwrite');
+		const t = this.db.transaction(['recurring', 'transactions', 'meta'], 'readwrite');
 		const rules = t.objectStore('recurring');
 		const cur = (await wrap(rules.get(ruleId))) as Recurring | undefined;
 		if (!cur || cur.lastHandled !== expectedPrev) {
@@ -186,6 +226,7 @@ export class LedgerRepo {
 		let added: Transaction | null = null;
 		if (row) {
 			t.objectStore('transactions').put({ ...plain(row), id: txId });
+			await untombstone(t.objectStore('meta'), 'transactions', [txId]);
 			added = { ...(row as object), id: txId } as Transaction;
 		}
 		await done(t);
@@ -193,17 +234,28 @@ export class LedgerRepo {
 	}
 
 	/**
-	 * Teljes csere (biztonsági mentés visszatöltése, pénznemváltás): egyetlen tranzakcióban,
-	 * mindent vagy semmit. A `prefs` a meta store-ba kerül.
+	 * Teljes csere (biztonsági mentés visszatöltése, pénznemváltás, szinkron eredményének átvétele):
+	 * egyetlen tranzakcióban, mindent vagy semmit. A `prefs` a meta store-ba kerül.
+	 *
+	 * Ha nincs `sync`, az adatok egésze cserélődik, ezért új korszak indul, és a törlési jelölők
+	 * elavulnak. A szinkron a saját korszakát és az összefésült jelölőket adja át.
 	 */
-	async replaceAll(data: LedgerData, prefs?: Prefs, prefsUpdatedAt: number = stamp()): Promise<void> {
+	async replaceAll(
+		data: LedgerData,
+		prefs?: Prefs,
+		prefsUpdatedAt: number = stamp(),
+		sync?: { epoch: SyncEpoch; tombstones: Tombstones }
+	): Promise<void> {
 		const tx = this.db.transaction([...DATA_STORES, 'meta'], 'readwrite');
 		for (const s of DATA_STORES) {
 			const os = tx.objectStore(s);
 			os.clear();
 			for (const row of data[s] as Row[]) os.put(plain(row));
 		}
-		if (prefs) tx.objectStore('meta').put({ key: 'prefs', value: { ...plain(prefs), updatedAt: prefsUpdatedAt } });
+		const meta = tx.objectStore('meta');
+		if (prefs) meta.put({ key: 'prefs', value: { ...plain(prefs), updatedAt: prefsUpdatedAt } });
+		meta.put({ key: 'syncEpoch', value: sync?.epoch ?? newEpoch() });
+		meta.put({ key: 'tombstones', value: sync ? plain(sync.tombstones) : {} });
 		await done(tx);
 	}
 
@@ -213,4 +265,28 @@ export class LedgerRepo {
 		for (const s of ALL_STORES) tx.objectStore(s).clear();
 		await done(tx);
 	}
+}
+
+async function readTombstones(meta: IDBObjectStore): Promise<Tombstones> {
+	const row = (await wrap(meta.get('tombstones'))) as { value?: Tombstones } | undefined;
+	return row?.value && typeof row.value === 'object' ? { ...row.value } : {};
+}
+
+async function readEpoch(meta: IDBObjectStore): Promise<SyncEpoch | null> {
+	const row = (await wrap(meta.get('syncEpoch'))) as { value?: unknown } | undefined;
+	return isEpoch(row?.value) ? row.value : null;
+}
+
+/** A megadott azonosítók törlési jelölőinek megszüntetése (ha voltak); a `meta` tárolót csak ilyenkor írja. */
+async function untombstone(meta: IDBObjectStore, store: DataStore, ids: number[]): Promise<void> {
+	const tombstones = await readTombstones(meta);
+	let changed = false;
+	for (const id of ids) {
+		const key = tombstoneKey(store, id);
+		if (key in tombstones) {
+			delete tombstones[key];
+			changed = true;
+		}
+	}
+	if (changed) meta.put({ key: 'tombstones', value: tombstones });
 }

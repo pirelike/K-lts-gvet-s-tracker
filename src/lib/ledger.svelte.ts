@@ -839,6 +839,7 @@ class Ledger {
 		const base = stamp(generated.length);
 		const rows = generated.map((t, i) => ({ ...t, createdAt: base + i, updatedAt: base + i }));
 		const added = await this.db.addMany<Transaction>('transactions', rows);
+		await this.db.startEpoch(); // az adatok egésze változott: a szinkron új korszakot lát
 		this.transactions = [...this.transactions, ...added];
 		this.notify();
 		return added.length;
@@ -848,6 +849,7 @@ class Ledger {
 		const ids = this.transactions.filter((t) => t.demo).map((t) => t.id);
 		if (ids.length === 0) return 0;
 		await this.db.removeMany('transactions', ids);
+		await this.db.startEpoch(); // az adatok egésze változott: a szinkron új korszakot lát
 		const gone = new Set(ids);
 		this.transactions = this.transactions.filter((t) => !gone.has(t.id));
 		this.notify();
