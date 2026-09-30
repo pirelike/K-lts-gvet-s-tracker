@@ -17,6 +17,7 @@ import {
 import { LedgerRepo } from './db/repo';
 import { ledger } from './ledger.svelte';
 import { sync } from './sync/engine.svelte';
+import { toastForSyncEvent } from './sync/notify';
 import type { Prefs } from './types';
 
 export type Phase = 'boot' | 'unsupported' | 'error' | 'setup' | 'locked' | 'unlocked';
@@ -98,6 +99,7 @@ class Auth {
 					repo: this.repo,
 					reload: () => ledger.reloadFromDb(),
 					unlocked: () => this.phase === 'unlocked',
+					onEvent: toastForSyncEvent,
 					// A működő szinkron egyben mentés is: a „régen volt mentés" emlékeztető ne jelenjen meg.
 					onSynced: (at) => {
 						this.lastBackupAt = at;

@@ -496,3 +496,22 @@ után döntöttem el; a tervezett viselkedés (ütközésmentes id-k, LWW, jelö
   nem közös, ezért a `MemoryBackend` cserélhető: alapból `localStorage`, de az e2e-teszt a
   `window.__syncMemoryBackend` horgonyon át Node-oldali, közös tárat köt be.
 - **Az e2e (`e2e/sync.mjs`) a 7. fázisban készül**, mert a csatlakozás végigkattintásához a felület kell.
+
+### 7. fázis (felület, `e2e/sync.mjs`)
+
+- **Az állapotjelző (`SyncBadge`) a `NavBar` mellett, rögzített helyen** van (telefonon jobb felül, oldalsávos
+  elrendezésnél a márkanév mellett), nem az alsó sáv egyik elemeként: az alsó sávban öt hely van, és a szinkron
+  csak akkor jelenik meg, ha be van kapcsolva. Ikonok: felhő (szinkronban / feltöltésre vár / nincs kapcsolat),
+  forgó nyilak, felkiáltójel, szünet. Kapcsolat nélkül nem hibajelzés, hanem „nincs kapcsolat" (az app offline-first).
+  Szüneteléskor koppintásra újra-hitelesít, egyébként a Beállításokhoz visz.
+- **Első indítás (`SetupScreen`):** a „Már használod másik eszközön?" gombok a PIN-ellenőrzés után előbb a
+  bejelentkezést indítják (a felugró ablak csak a gombnyomás gesztusából nyílhat), majd beállítják a PIN-t, és
+  a Beállítások szinkron-szekciójába visznek, ahol a szinkronjelszó megadásával fejeződik be a csatlakozás.
+  A motor `probe` állapota tartja meg a félbehagyott csatlakozást.
+- **Toastok (`sync/notify.ts`):** a `report` alapján, csak érdemi változásnál („3 új tétel érkezett a másik
+  eszközről"), hivatkozás-javításnál és korszak-veszteségnél; az utóbbin „Mentés letöltése" gomb.
+- **Az e2e hash-navigációja:** a `location.hash = …` a SvelteKit hash-routerében (lekérdezőszöveggel az URL-ben)
+  teljes újratöltést okoz, és az app zárolna. Az e2e ezért linkkattintást szimulál, ahogy a felhasználó navigál.
+- **A `start()` már utólag is bekötheti a figyelőket** (láthatóság, `online`): a kapcsolat a feloldás után jön
+  létre, így a figyelőket nem lehetett a `start()`-ban egyszer, feltétel nélkül bekötni. Az e2e találta meg.
+- A `?syncProvider=memory` az URL lekérdezőszövegében marad meg, a hash-router nem bántja.

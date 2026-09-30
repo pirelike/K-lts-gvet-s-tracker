@@ -100,6 +100,8 @@ export class SyncEngine {
 	/** Az eltérő korszak miatt elveszett helyi módosítások előtti mentés (JSON), amíg a felhasználó le nem tölti. */
 	lostBackup = $state<{ at: number; json: string } | null>(null);
 	connected = $derived(this.providerId !== null);
+	/** A folyamatban lévő csatlakozás (bejelentkezés kész, a jelszó/döntés még hátravan); a felület ebből rajzol. */
+	probe = $state<ConnectProbe | null>(null);
 
 	private host: SyncHost | null = null;
 	private conn: SyncConnection | null = null;
@@ -210,30 +212,34 @@ export class SyncEngine {
 
 	// ---------- ütemezés ----------
 
-	/** A feloldás után: a figyelők bekötése és (alapból) az első szinkron. */
+	/** A feloldás után: (kapcsolat esetén) a figyelők bekötése és alapból az első szinkron. */
 	start(opts: { run?: boolean } = {}) {
-		if (this.active) return;
+		const wasActive = this.active;
 		this.active = true;
 		if (!this.conn) return;
-		if (typeof document !== 'undefined') {
-			const onVisibility = () => {
-				if (!this.active) return;
-				if (document.hidden) {
-					// Elrejtéskor egy utolsó, gyors feltöltés, ha van függő módosítás.
-					if (this.pendingLocalChanges) void this.run();
-				} else if (this.now() - this.lastRunAt >= VISIBLE_MIN_INTERVAL_MS) {
-					void this.run();
-				}
-			};
-			const onOnline = () => void this.run();
-			document.addEventListener('visibilitychange', onVisibility);
-			window.addEventListener('online', onOnline);
-			this.listeners = [
-				() => document.removeEventListener('visibilitychange', onVisibility),
-				() => window.removeEventListener('online', onOnline)
-			];
-		}
-		if (opts.run !== false) void this.run();
+		this.bindListeners();
+		if (!wasActive && opts.run !== false) void this.run();
+	}
+
+	/** A láthatóság- és online-figyelők bekötése (egyszer; a kapcsolat létrejöhet a feloldás után is). */
+	private bindListeners() {
+		if (this.listeners.length > 0 || typeof document === 'undefined') return;
+		const onVisibility = () => {
+			if (!this.active) return;
+			if (document.hidden) {
+				// Elrejtéskor egy utolsó, gyors feltöltés, ha van függő módosítás.
+				if (this.pendingLocalChanges) void this.run();
+			} else if (this.now() - this.lastRunAt >= VISIBLE_MIN_INTERVAL_MS) {
+				void this.run();
+			}
+		};
+		const onOnline = () => void this.run();
+		document.addEventListener('visibilitychange', onVisibility);
+		window.addEventListener('online', onOnline);
+		this.listeners = [
+			() => document.removeEventListener('visibilitychange', onVisibility),
+			() => window.removeEventListener('online', onOnline)
+		];
 	}
 
 	/** Zároláskor: nincs több indítás; a folyamatban lévő futás befejeződik, de nem tölt be semmit a memóriába. */
@@ -440,18 +446,19 @@ export class SyncEngine {
 			await this.cancelConnect();
 			throw e;
 		}
-		if (!p.remoteFile) return { account: p.account, remote: { exists: false } };
+		if (!p.remoteFile) return (this.probe = { account: p.account, remote: { exists: false } });
 		const head = peekSyncFile(p.remoteFile.text);
 		if (!head.ok) {
 			await this.cancelConnect();
 			throw new Error(head.error);
 		}
-		return { account: p.account, remote: { exists: true, encrypted: head.encrypted } };
+		return (this.probe = { account: p.account, remote: { exists: true, encrypted: head.encrypted } });
 	}
 
 	async cancelConnect() {
 		const p = this.pending;
 		this.pending = null;
+		this.probe = null;
 		if (p) await p.provider.disconnect().catch(() => {});
 	}
 
@@ -530,6 +537,7 @@ export class SyncEngine {
 		this.key = key;
 		this.provider = p.provider;
 		this.pending = null;
+		this.probe = null;
 		await repo.setMeta(META_SYNC, conn);
 		if (key) await repo.setMetaRaw(META_SYNC_KEY, key);
 		else await repo.deleteMeta(META_SYNC_KEY);
@@ -650,6 +658,7 @@ export class SyncEngine {
 		this.setDisconnected();
 		this.lostBackup = null;
 		this.pending = null;
+		this.probe = null;
 	}
 }
 

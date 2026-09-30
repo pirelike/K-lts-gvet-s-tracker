@@ -1,7 +1,17 @@
 <script lang="ts">
 	import { auth } from '$lib/auth.svelte';
 	import { PIN_MAX, PIN_MIN, pinFormatError } from '$lib/db/pin';
+	import { go } from '$lib/nav';
+	import { sync } from '$lib/sync/engine.svelte';
+	import type { ProviderId } from '$lib/sync/provider';
 	import AppLogo from './AppLogo.svelte';
+
+	const providers = sync.availableProviders();
+	const LABEL: Record<ProviderId, string> = {
+		gdrive: 'Csatlakozás Google-lel',
+		dropbox: 'Csatlakozás Dropboxszal',
+		memory: 'Memória-szolgáltató (teszt)'
+	};
 
 	let pin = $state('');
 	let pin2 = $state('');
@@ -16,6 +26,29 @@
 		busy = true;
 		error = (await auth.setup(pin, withDemo)) ?? '';
 		busy = false;
+	}
+
+	/** „Már használom másik eszközön": bejelentkezés a felhőbe, majd a PIN beállítása és a szinkron befejezése a Beállításokban. */
+	async function connectExisting(id: ProviderId) {
+		error = pinFormatError(pin) ?? (pin !== pin2 ? 'A két PIN nem egyezik' : '');
+		if (error) return;
+		busy = true;
+		try {
+			// Előbb a bejelentkezés: a felugró ablak csak a gombnyomás gesztusából nyílhat meg.
+			await sync.beginConnect(id);
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'A bejelentkezés nem sikerült';
+			busy = false;
+			return;
+		}
+		const err = await auth.setup(pin, false);
+		busy = false;
+		if (err) {
+			error = err;
+			await sync.cancelConnect();
+			return;
+		}
+		await go('/settings'); // a szinkronjelszó megadása itt fejeződik be (SyncPanel)
 	}
 </script>
 
@@ -69,6 +102,16 @@
 				</span>
 			</label>
 			<button class="btn primary block" type="submit" disabled={busy}>Kezdjük</button>
+			{#if providers.length > 0}
+				<hr />
+				<div class="stack" data-testid="setup-connect">
+					<p><strong>Már használod másik eszközön?</strong></p>
+					<p class="hint">Jelentkezz be ugyanabba a tárhelybe, és az adataid átkerülnek erre az eszközre. A PIN eszközönként külön van.</p>
+					{#each providers as p}
+						<button class="btn block" type="button" disabled={busy} onclick={() => connectExisting(p.id)} data-provider={p.id}>{LABEL[p.id]}</button>
+					{/each}
+				</div>
+			{/if}
 		</div>
 
 		<p class="hint center">

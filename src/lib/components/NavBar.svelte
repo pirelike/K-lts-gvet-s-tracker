@@ -3,6 +3,7 @@
 	import { href } from '$lib/nav';
 	import { ledger } from '$lib/ledger.svelte';
 	import Icon from './Icon.svelte';
+	import SyncBadge from './SyncBadge.svelte';
 
 	/** Telefonon az alsó sávban: a leggyakoribb öt hely; a többi a „Több" menüben. Nagy kijelzőn minden az oldalsávban van. */
 	const items = [
@@ -49,3 +50,5 @@
 		</a>
 	{/each}
 </nav>
+
+<SyncBadge />

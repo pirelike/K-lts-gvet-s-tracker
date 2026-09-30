@@ -6,7 +6,7 @@
  * A `localStorage` egy böngészőkontextuson belül közös, két elszigetelt kontextus (két „eszköz") között
  * nem. Az e2e-teszt ezért a `window.__syncMemoryBackend` horgonyon át közös, Node-oldali tárat köt be.
  */
-import type { ProviderId, RemoteFile, SyncProvider, WriteResult } from './provider';
+import { SyncNetworkError, type ProviderId, type SyncProvider, type WriteResult } from './provider';
 
 /** A „felhő": egy fájl és a változatszáma. Aszinkron, hogy hálózatot is lehessen mögé kötni. */
 export interface MemoryBackend {
@@ -103,6 +103,14 @@ export function createMemoryProvider(
 		if (!backend) throw new Error('A memória-szolgáltató itt nem érhető el');
 		return backend;
 	};
+	/** A tár elérhetetlensége (pl. az e2e-teszt „offline" állapota) hálózati hibaként jelentkezik. */
+	const reach = async <T>(fn: () => Promise<T>): Promise<T> => {
+		try {
+			return await fn();
+		} catch {
+			throw new SyncNetworkError();
+		}
+	};
 	return {
 		id,
 		label: 'Memória (teszt)',
@@ -114,11 +122,9 @@ export function createMemoryProvider(
 		async ensureToken() {
 			return true;
 		},
-		async read(): Promise<RemoteFile | null> {
-			return need().read();
-		},
-		write: (text, prevRev) => need().write(text, prevRev),
-		removeFile: () => need().remove(),
+		read: () => reach(() => need().read()),
+		write: (text, prevRev) => reach(() => need().write(text, prevRev)),
+		removeFile: () => reach(() => need().remove()),
 		async disconnect() {}
 	};
 }

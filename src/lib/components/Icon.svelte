@@ -22,7 +22,11 @@
 		upload: 'M12 15V3|m7 8 5-5 5 5|M4 21h16',
 		check: 'M20 6 9 17l-5-5',
 		template: 'M4 4h16v6H4z|M4 14h7v6H4z|M15 14h5v6h-5z',
-		gauge: 'M12 14l4-4|M3.3 17a10 10 0 1 1 17.4 0'
+		gauge: 'M12 14l4-4|M3.3 17a10 10 0 1 1 17.4 0',
+		cloud: 'M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z',
+		sync: 'M23 4v6h-6|M1 20v-6h6|M3.51 9a9 9 0 0 1 14.85-3.36L23 10|M1 14l4.64 4.36A9 9 0 0 0 20.49 15',
+		alert: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z|M12 8v4|M12 16h.01',
+		pause: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z|M10 9v6|M14 9v6'
 	};
 	let { name, size = 24 }: { name: keyof typeof PATHS | string; size?: number } = $props();
 </script>
