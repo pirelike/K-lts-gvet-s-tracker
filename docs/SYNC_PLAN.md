@@ -453,3 +453,17 @@ után döntöttem el; a tervezett viselkedés (ütközésmentes id-k, LWW, jelö
   sablon, cél, mentett szűrő és a beállított keret is „saját adat". Az érintetlen alapelemek (`updatedAt` = 0)
   és a példaadatok nem. Óvatos: gyanús esetben a felhasználó dönt.
 - **`validateState`** a `makeBackup` + `parseBackup` láncot futtatja, és csak `ok`/hibaüzenetet ad vissza.
+
+### 5. fázis (`format.ts`, kulcsos titkosítás)
+
+- **`setMetaRaw` a repóban.** A `setMeta` JSON-kerülőt használ, ami a `CryptoKey`-t `{}`-vá tenné. A
+  szinkronkulcsot (`meta.syncKey`) ezért a nyers, structured clone-os `setMetaRaw` írja; a `getMeta` változatlan.
+- **`peekSyncFile`**: a fejléc vizsgálata visszafejtés nélkül. Csatlakozáskor kell, mert a kulcshoz a fájl
+  sója és iterációszáma szükséges, még mielőtt a jelszóból kulcs lenne.
+- **A beérkező állapot ellenőrzése a formátumrétegben történik** (`parseSyncPayload`): a `parseBackup`
+  ellenőrzi és normalizálja az adatokat, a törlési jelölők közül az ismeretlen tárolóra vagy hibás időre
+  vonatkozókat eldobja. Így a motor (6. fázis) már csak érvényes `SyncState`-et kap.
+- **A hibakódok** (`invalid`, `unsupported`, `needsPassword`, `wrongPassword`, `badState`) a felületnek szólnak.
+  Jelszócsere után a régi kulcs sója eltér a fájlétól, ezért azonnal „Hibás szinkronjelszó" a válasz, a
+  visszafejtési kísérlet nélkül.
+- Az iterációszám felső korlátja (5 000 000) a `crypto.ts`-ben közös konstans lett (`MAX_KDF_ITERATIONS`).

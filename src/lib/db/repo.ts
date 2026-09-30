@@ -143,6 +143,16 @@ export class LedgerRepo {
 		await done(tx);
 	}
 
+	/**
+	 * Mint a `setMeta`, de a JSON-kerülő nélkül, az IndexedDB saját (structured clone) másolásával. Kell
+	 * a `CryptoKey`-hez (szinkronkulcs), amit a JSON-kerülő értéktelen `{}`-vá tenne.
+	 */
+	async setMetaRaw<T>(key: string, value: T): Promise<void> {
+		const tx = this.db.transaction('meta', 'readwrite');
+		tx.objectStore('meta').put({ key, value });
+		await done(tx);
+	}
+
 	/** A beállítások a módosítás idejével (a szinkronhoz); a `meta.prefs` értéke a kettő együtt. */
 	async getPrefs(): Promise<{ prefs: Prefs; updatedAt: number }> {
 		const stored = await this.getMeta<Prefs & { updatedAt?: number }>('prefs');
